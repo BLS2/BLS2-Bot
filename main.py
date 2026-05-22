@@ -1,16 +1,12 @@
 import discord
 from discord.ext import commands
-from discord.ui import View, Select
-import os
-import datetime
-import json
-import io
-
 from flask import Flask
 from threading import Thread
+import os
+import asyncio
 
 # ===============================
-# Flask (Web Service)
+# Flask (تشغيل البوت 24/7)
 # ===============================
 
 app = Flask('')
@@ -27,8 +23,13 @@ def keep_alive():
     Thread(target=run_web).start()
 
 # ===============================
+# إعدادات البوت
+# ===============================
 
 TOKEN = os.getenv("TOKEN")
+
+# ايدي الروم الي تكتب فيه الرسالة
+CHANNEL_ID = 1507516304716992654
 
 intents = discord.Intents.all()
 intents.message_content = True
@@ -39,92 +40,16 @@ bot = commands.Bot(
 )
 
 # ===============================
-# الترقيم
+# عند تشغيل البوت
 # ===============================
 
-COUNTER_FILE = "ticket_counter.json"
+@bot.event
+async def on_ready():
 
-def get_ticket_number():
-
-    if not os.path.exists(COUNTER_FILE):
-
-        with open(COUNTER_FILE, "w") as f:
-            json.dump({"ticket": 0}, f)
-
-    with open(COUNTER_FILE, "r") as f:
-        data = json.load(f)
-
-    data["ticket"] += 1
-
-    with open(COUNTER_FILE, "w") as f:
-        json.dump(data, f)
-
-    return data["ticket"]
+    print(f"✅ Logged in as {bot.user}")
 
 # ===============================
-# الإعدادات
-# ===============================
-
-RANK_CATEGORY = 1494665237717323907
-PERSON_CATEGORY = 1494665311331291258
-SHOP_CATEGORY = 1487848330804330699
-SUPPORT_CATEGORY = 1487721982945394728
-ADMIN_CATEGORY = 1487709726765748295
-
-LOG_CHANNEL = 1480456866613170267
-
-SUPPORT_ROLES = [
-    1477492633847857252,
-    1482194383515422752,
-    1480443913557905499,
-    1478970736717598840
-]
-
-SPECIAL_ROLES = [
-    1490386915629989948,
-    1495873706923393205,
-    1478971845729583276
-]
-
-# رتبة المتجر
-SHOP_VIEW_ROLE = 1480712644418867413
-
-ALL_ROLES = list(set(
-    SUPPORT_ROLES +
-    SPECIAL_ROLES +
-    [SHOP_VIEW_ROLE]
-))
-
-# ===============================
-# أمر إضافة عضو
-# ===============================
-
-@bot.command()
-async def add(ctx, member: discord.Member):
-
-    if not any(r.id in ALL_ROLES for r in ctx.author.roles):
-
-        return await ctx.send(
-            "❌ لا تملك صلاحية."
-        )
-
-    await ctx.channel.set_permissions(
-        member,
-        read_messages=True,
-        send_messages=True
-    )
-
-    embed = discord.Embed(
-        title="➕ تم إضافة عضو",
-        description=f"تم إضافة {member.mention} إلى التكت.",
-        color=discord.Color.green(),
-        timestamp=datetime.datetime.now(datetime.UTC)
-    )
-
-    await ctx.send(embed=embed)
-
-# ===============================
-# منع الكتابة قبل الاستلام
+# نظام الإرسال الخاص
 # ===============================
 
 @bot.event
@@ -133,532 +58,86 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    if not isinstance(message.channel, discord.TextChannel):
-        return await bot.process_commands(message)
+    # يتأكد ان الرسالة من الروم المحدد
+    if message.channel.id == CHANNEL_ID:
 
-    channel = message.channel
+        # رسالة التأكيد
+        confirm = await message.channel.send(
+            f"{message.author.mention}\n"
+            "هل أنت متأكد من إرسال هذه الرسالة لجميع أعضاء السيرفر؟\n\n"
+            "اكتب: نعم\n"
+            "أو اكتب: لا"
+        )
 
-    if not channel.name.startswith("ticket-"):
-        return await bot.process_commands(message)
+        def check(m):
 
-    if not channel.topic:
-        return await bot.process_commands(message)
-
-    try:
-
-        opener_id, claimed_id = channel.topic.split("|")
-
-    except:
-        return await bot.process_commands(message)
-
-    # صاحب التكت يقدر يكتب
-    if message.author.id == int(opener_id):
-        return await bot.process_commands(message)
-
-    # الإدارة
-    if any(r.id in ALL_ROLES for r in message.author.roles):
-
-        # التكت غير مستلمة
-        if claimed_id == "0":
-
-            try:
-                await message.delete()
-            except:
-                pass
-
-            msg = await channel.send(
-                f"{message.author.mention} ❌ يجب استلام التكت أولاً."
+            return (
+                m.author == message.author
+                and m.channel == message.channel
             )
 
-            await msg.delete(delay=5)
-            return
+        try:
 
-        # فقط المستلم يكتب
-        if message.author.id != int(claimed_id):
-
-            try:
-                await message.delete()
-            except:
-                pass
-
-            msg = await channel.send(
-                f"{message.author.mention} ❌ فقط مستلم التكت يمكنه الكتابة."
+            reply = await bot.wait_for(
+                "message",
+                timeout=30,
+                check=check
             )
 
-            await msg.delete(delay=5)
-            return
+            # اذا وافق
+            if reply.content.lower() in ["نعم", "yes", "y"]:
+
+                sent = 0
+                failed = 0
+
+                loading = await message.channel.send(
+                    "📨 جاري إرسال الرسائل الخاصة..."
+                )
+
+                for member in message.guild.members:
+
+                    # يتخطى البوتات
+                    if member.bot:
+                        continue
+
+                    try:
+
+                        await member.send(message.content)
+                        sent += 1
+
+                        # تأخير بسيط عشان ما يتبند البوت
+                        await asyncio.sleep(1)
+
+                    except:
+
+                        failed += 1
+
+                await loading.edit(
+
+                    content=(
+                        f"✅ تم إرسال الرسالة لـ {sent} عضو\n"
+                        f"❌ فشل الإرسال لـ {failed} عضو"
+                    )
+
+                )
+
+            else:
+
+                await message.channel.send(
+                    "❌ تم إلغاء الإرسال"
+                )
+
+        except asyncio.TimeoutError:
+
+            await message.channel.send(
+                "⌛ انتهى وقت التأكيد"
+            )
 
     await bot.process_commands(message)
 
 # ===============================
-# مودال الإغلاق
-# ===============================
-
-class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
-
-    reason = discord.ui.TextInput(
-        label="سبب الإغلاق",
-        style=discord.TextStyle.paragraph
-    )
-
-    async def on_submit(self, interaction):
-
-        await interaction.response.defer()
-
-        channel = interaction.channel
-        log = bot.get_channel(LOG_CHANNEL)
-
-        closer = interaction.user
-        opener_id = None
-
-        # ===============================
-        # استخراج صاحب التكت
-        # ===============================
-
-        if channel.topic and "|" in channel.topic:
-            opener_id = channel.topic.split("|")[0]
-
-        # ===============================
-        # سحب المحادثة
-        # ===============================
-
-        messages = []
-
-        async for m in channel.history(limit=300):
-            messages.append(f"{m.author}: {m.content}")
-
-        transcript = "\n".join(messages)
-
-        file = discord.File(
-            io.BytesIO(transcript.encode()),
-            filename="transcript.txt"
-        )
-
-        # ===============================
-        # لوق الإغلاق
-        # ===============================
-
-        embed = discord.Embed(
-            title="📁 تم إغلاق التكت",
-            color=discord.Color.red(),
-            timestamp=datetime.datetime.now(datetime.UTC)
-        )
-
-        embed.add_field(
-            name="👤 الشخص الذي أغلق التكت",
-            value=closer.mention,
-            inline=False
-        )
-
-        embed.add_field(
-            name="📂 اسم التكت",
-            value=channel.name,
-            inline=False
-        )
-
-        embed.add_field(
-            name="📌 سبب الإغلاق",
-            value=self.reason.value,
-            inline=False
-        )
-
-        if log:
-
-            await log.send(
-                content=f"🔒 تم إغلاق التكت بواسطة {closer.mention}",
-                embed=embed,
-                file=file
-            )
-
-        # ===============================
-        # رسالة خاصة لصاحب التكت
-        # ===============================
-
-        try:
-
-            if opener_id:
-
-                user = await bot.fetch_user(int(opener_id))
-
-                private_embed = discord.Embed(
-                    title="📁 تم إغلاق تذكرتك",
-                    description=(
-                        "نشكر تواصلك معنا 💙\n\n"
-                        f"👤 تم إغلاق التكت بواسطة: {closer.mention}\n\n"
-                        f"📌 سبب الإغلاق:\n{self.reason.value}\n\n"
-                        "⭐ تشرفنا بخدمتك في سيرفر BLS"
-                    ),
-                    color=discord.Color.blue(),
-                    timestamp=datetime.datetime.now(datetime.UTC)
-                )
-
-                await user.send(embed=private_embed)
-
-        except:
-            pass
-
-        # ===============================
-        # حذف التكت
-        # ===============================
-
-        await channel.delete()
-
-# ===============================
-# أزرار التكت
-# ===============================
-
-class TicketButtons(View):
-
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(
-        label="📌 استلام التكت",
-        style=discord.ButtonStyle.green,
-        custom_id="claim_ticket"
-    )
-    async def claim_ticket(self, interaction, button):
-
-        if not any(r.id in ALL_ROLES for r in interaction.user.roles):
-
-            return await interaction.response.send_message(
-                "❌ لا تملك صلاحية.",
-                ephemeral=True
-            )
-
-        channel = interaction.channel
-        guild = interaction.guild
-
-        opener, claimed = channel.topic.split("|")
-
-        if claimed != "0":
-
-            user = await bot.fetch_user(int(claimed))
-
-            return await interaction.response.send_message(
-                f"❌ التكت مستلمة بواسطة {user.mention}",
-                ephemeral=True
-            )
-
-        # تحديث المستلم
-        await channel.edit(
-            topic=f"{opener}|{interaction.user.id}"
-        )
-
-        # ===============================
-        # تحديد الرتب الخاصة بالقسم
-        # ===============================
-
-        if channel.category.id == SHOP_CATEGORY:
-
-            roles_to_lock = [SHOP_VIEW_ROLE]
-
-        elif channel.category.id == ADMIN_CATEGORY:
-
-            roles_to_lock = SPECIAL_ROLES
-
-        else:
-
-            roles_to_lock = SUPPORT_ROLES
-
-        # ===============================
-        # منع الكتابة عن باقي الرتب
-        # ===============================
-
-        for role_id in roles_to_lock:
-
-            role = guild.get_role(role_id)
-
-            if role:
-
-                await channel.set_permissions(
-                    role,
-                    read_messages=True,
-                    send_messages=False
-                )
-
-        # السماح للمستلم فقط
-        await channel.set_permissions(
-            interaction.user,
-            read_messages=True,
-            send_messages=True
-        )
-
-        embed = discord.Embed(
-            title="📌 تم استلام التكت",
-            description=f"👤 المستلم: {interaction.user.mention}",
-            color=discord.Color.green(),
-            timestamp=datetime.datetime.now(datetime.UTC)
-        )
-
-        await interaction.response.send_message(
-            embed=embed
-        )
-
-    @discord.ui.button(
-        label="🔒 إغلاق التكت",
-        style=discord.ButtonStyle.red,
-        custom_id="close_ticket"
-    )
-    async def close_ticket(self, interaction, button):
-
-        if not any(r.id in ALL_ROLES for r in interaction.user.roles):
-
-            return await interaction.response.send_message(
-                "❌ لا تملك صلاحية.",
-                ephemeral=True
-            )
-
-        await interaction.response.send_modal(
-            CloseModal()
-        )
-
-# ===============================
-# إنشاء التكت
-# ===============================
-
-async def create_ticket(interaction, ticket_type):
-
-    guild = interaction.guild
-    user = interaction.user
-
-    ticket_number = get_ticket_number()
-
-    categories = {
-
-        "support": SUPPORT_CATEGORY,
-        "shop": SHOP_CATEGORY,
-        "admin": ADMIN_CATEGORY,
-        "rank": RANK_CATEGORY,
-        "person": PERSON_CATEGORY
-
-    }
-
-    category = guild.get_channel(
-        categories[ticket_type]
-    )
-
-    # ===============================
-    # تحديد الرتب حسب القسم
-    # ===============================
-
-    if ticket_type == "shop":
-
-        roles_to_add = [SHOP_VIEW_ROLE]
-
-    elif ticket_type == "admin":
-
-        roles_to_add = SPECIAL_ROLES
-
-    else:
-
-        roles_to_add = SUPPORT_ROLES
-
-    # ===============================
-    # الصلاحيات
-    # ===============================
-
-    overwrites = {
-
-        guild.default_role:
-            discord.PermissionOverwrite(
-                read_messages=False
-            ),
-
-        user:
-            discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True
-            )
-    }
-
-    # الرتب تشوف فقط
-    for role_id in roles_to_add:
-
-        role = guild.get_role(role_id)
-
-        if role:
-
-            overwrites[role] = discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=False
-            )
-
-    # ===============================
-    # إنشاء التكت
-    # ===============================
-
-    channel = await guild.create_text_channel(
-
-        name=f"ticket-{ticket_number}",
-        category=category,
-        overwrites=overwrites,
-        topic=f"{user.id}|0"
-
-    )
-
-    # ===============================
-    # منشن الرتب
-    # ===============================
-
-    mentions = " ".join(
-        f"<@&{role_id}>"
-        for role_id in roles_to_add
-    )
-
-    # ===============================
-    # الإيمبد
-    # ===============================
-
-    embed = discord.Embed(
-
-        title="🎫 تم فتح التكت",
-
-        description=(
-            "📜 **قوانين التكت:**\n"
-            "• اشرح مشكلتك بوضوح\n"
-            "• احترام الإدارة\n"
-            "• يمنع الإزعاج\n\n"
-            "⛔ الإدارة لا تستطيع الكتابة حتى يتم استلام التكت\n"
-            "📌 فقط مستلم التكت يمكنه الكتابة"
-        ),
-
-        color=discord.Color.blue(),
-        timestamp=datetime.datetime.now(datetime.UTC)
-
-    )
-
-    if guild.icon:
-
-        embed.set_thumbnail(
-            url=guild.icon.url
-        )
-
-    # ===============================
-    # إرسال التكت
-    # ===============================
-
-    await channel.send(
-        content=f"{user.mention} {mentions}",
-        embed=embed,
-        view=TicketButtons()
-    )
-
-    await interaction.response.send_message(
-        f"✅ تم فتح التكت: {channel.mention}",
-        ephemeral=True
-    )
-
-# ===============================
-# القائمة
-# ===============================
-
-class TicketSelect(Select):
-
-    def __init__(self):
-
-        options = [
-
-            discord.SelectOption(
-                label="الدعم الفني",
-                emoji="🛠️",
-                value="support"
-            ),
-
-            discord.SelectOption(
-                label="المتجر",
-                emoji="🛒",
-                value="shop"
-            ),
-
-            discord.SelectOption(
-                label="شكوى على إداري",
-                emoji="⚖️",
-                value="admin"
-            ),
-
-            discord.SelectOption(
-                label="طلب رانك",
-                emoji="⭐",
-                value="rank"
-            ),
-
-            discord.SelectOption(
-                label="شكوى على شخص",
-                emoji="🚫",
-                value="person"
-            )
-
-        ]
-
-        super().__init__(
-            placeholder="اختر نوع التكت",
-            options=options,
-            custom_id="ticket_select_menu"
-        )
-
-    async def callback(self, interaction):
-
-        await create_ticket(
-            interaction,
-            self.values[0]
-        )
-
-class TicketPanel(View):
-
-    def __init__(self):
-
-        super().__init__(timeout=None)
-
-        self.add_item(
-            TicketSelect()
-        )
-
-# ===============================
-# أمر لوحة التكت
-# ===============================
-
-@bot.command()
-async def panel(ctx):
-
-    embed = discord.Embed(
-
-        title="🎫 نظام التكت",
-
-        description=(
-            "📜 **قوانين فتح التكت:**\n"
-            "• اختر القسم المناسب\n"
-            "• لا تفتح أكثر من تكت\n"
-            "• احترام الإدارة\n\n"
-            "⬇️ اختر نوع التكت"
-        ),
-
-        color=discord.Color.blue()
-
-    )
-
-    if ctx.guild.icon:
-
-        embed.set_thumbnail(
-            url=ctx.guild.icon.url
-        )
-
-    await ctx.send(
-        embed=embed,
-        view=TicketPanel()
-    )
-
-# ===============================
 # تشغيل البوت
 # ===============================
-
-@bot.event
-async def on_ready():
-
-    print(f"✅ Logged in as {bot.user}")
-
-    bot.add_view(TicketPanel())
-    bot.add_view(TicketButtons())
 
 keep_alive()
 
