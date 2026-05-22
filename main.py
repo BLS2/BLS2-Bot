@@ -28,7 +28,7 @@ def keep_alive():
 
 TOKEN = os.getenv("TOKEN")
 
-# ايدي الروم الي تكتب فيه الرسالة
+# ايدي الروم
 CHANNEL_ID = 1507516304716992654
 
 intents = discord.Intents.all()
@@ -61,8 +61,12 @@ async def on_message(message):
     # يتأكد ان الرسالة من الروم المحدد
     if message.channel.id == CHANNEL_ID:
 
+        # يمنع الرد على نعم او لا
+        if message.content.lower() in ["نعم", "لا", "yes", "no", "y", "n"]:
+            return
+
         # رسالة التأكيد
-        confirm = await message.channel.send(
+        await message.channel.send(
             f"{message.author.mention}\n"
             "هل أنت متأكد من إرسال هذه الرسالة لجميع أعضاء السيرفر؟\n\n"
             "اكتب: نعم\n"
@@ -78,54 +82,68 @@ async def on_message(message):
 
         try:
 
-            reply = await bot.wait_for(
-                "message",
-                timeout=30,
-                check=check
-            )
+            while True:
 
-            # اذا وافق
-            if reply.content.lower() in ["نعم", "yes", "y"]:
-
-                sent = 0
-                failed = 0
-
-                loading = await message.channel.send(
-                    "📨 جاري إرسال الرسائل الخاصة..."
+                reply = await bot.wait_for(
+                    "message",
+                    timeout=30,
+                    check=check
                 )
 
-                for member in message.guild.members:
+                # موافقة
+                if reply.content.lower() in ["نعم", "yes", "y"]:
 
-                    # يتخطى البوتات
-                    if member.bot:
-                        continue
+                    sent = 0
+                    failed = 0
 
-                    try:
-
-                        await member.send(message.content)
-                        sent += 1
-
-                        # تأخير بسيط عشان ما يتبند البوت
-                        await asyncio.sleep(1)
-
-                    except:
-
-                        failed += 1
-
-                await loading.edit(
-
-                    content=(
-                        f"✅ تم إرسال الرسالة لـ {sent} عضو\n"
-                        f"❌ فشل الإرسال لـ {failed} عضو"
+                    loading = await message.channel.send(
+                        "📨 جاري إرسال الرسائل الخاصة..."
                     )
 
-                )
+                    for member in message.guild.members:
 
-            else:
+                        # يتخطى البوتات
+                        if member.bot:
+                            continue
 
-                await message.channel.send(
-                    "❌ تم إلغاء الإرسال"
-                )
+                        try:
+
+                            await member.send(message.content)
+                            sent += 1
+
+                            # تأخير بسيط
+                            await asyncio.sleep(1)
+
+                        except:
+
+                            failed += 1
+
+                    await loading.edit(
+
+                        content=(
+                            f"✅ تم إرسال الرسالة لـ {sent} عضو\n"
+                            f"❌ فشل الإرسال لـ {failed} عضو"
+                        )
+
+                    )
+
+                    break
+
+                # رفض
+                elif reply.content.lower() in ["لا", "no", "n"]:
+
+                    await message.channel.send(
+                        "❌ تم إلغاء الإرسال"
+                    )
+
+                    break
+
+                # اذا كتب شيء غلط
+                else:
+
+                    await message.channel.send(
+                        "❌ اكتب فقط نعم أو لا"
+                    )
 
         except asyncio.TimeoutError:
 
