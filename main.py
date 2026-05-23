@@ -28,11 +28,15 @@ def keep_alive():
 
 TOKEN = os.getenv("TOKEN")
 
-# ايدي الروم
+# ايدي الروم المخصص للإرسال
 CHANNEL_ID = 1507516304716992654
+
+# ايدي الرتبة المستهدفة
+ROLE_ID = 1480272598649671730
 
 intents = discord.Intents.all()
 intents.message_content = True
+intents.members = True
 
 bot = commands.Bot(
     command_prefix="!",
@@ -46,7 +50,10 @@ bot = commands.Bot(
 @bot.event
 async def on_ready():
 
+    print("===================================")
     print(f"✅ Logged in as {bot.user}")
+    print("🚀 Bot is online and ready")
+    print("===================================")
 
 # ===============================
 # نظام الإرسال الخاص
@@ -58,19 +65,23 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # يتأكد ان الرسالة من الروم المحدد
+    # التأكد من الروم المحدد
     if message.channel.id == CHANNEL_ID:
 
-        # يمنع الرد على نعم او لا
-        if message.content.lower() in ["نعم", "لا", "yes", "no", "y", "n"]:
+        # تجاهل نعم ولا
+        if message.content.lower() in [
+            "نعم", "لا",
+            "yes", "no",
+            "y", "n"
+        ]:
             return
 
         # رسالة التأكيد
         await message.channel.send(
-            f"{message.author.mention}\n"
-            "هل أنت متأكد من إرسال هذه الرسالة لجميع أعضاء السيرفر؟\n\n"
-            "اكتب: نعم\n"
-            "أو اكتب: لا"
+            f"📨 | {message.author.mention}\n\n"
+            "هل تريد إرسال هذه الرسالة إلى جميع أعضاء الرتبة المحددة؟\n\n"
+            "✅ اكتب: نعم\n"
+            "❌ اكتب: لا"
         )
 
         def check(m):
@@ -90,65 +101,113 @@ async def on_message(message):
                     check=check
                 )
 
-                # موافقة
-                if reply.content.lower() in ["نعم", "yes", "y"]:
+                # ===============================
+                # الموافقة
+                # ===============================
+
+                if reply.content.lower() in [
+                    "نعم",
+                    "yes",
+                    "y"
+                ]:
+
+                    role = message.guild.get_role(ROLE_ID)
+
+                    if not role:
+
+                        await message.channel.send(
+                            "❌ لم يتم العثور على الرتبة المطلوبة."
+                        )
+                        return
+
+                    loading = await message.channel.send(
+                        "⏳ جاري إرسال الرسائل الخاصة..."
+                    )
 
                     sent = 0
                     failed = 0
 
-                    loading = await message.channel.send(
-                        "📨 جاري إرسال الرسائل الخاصة..."
-                    )
+                    for member in role.members:
 
-                    for member in message.guild.members:
-
-                        # يتخطى البوتات
+                        # تجاهل البوتات
                         if member.bot:
                             continue
 
                         try:
 
-                            await member.send(message.content)
+                            # إنشاء Embed احترافي
+                            embed = discord.Embed(
+                                title="📩 رسالة جديدة",
+                                description=message.content if message.content else "بدون نص",
+                                color=0x2F3136
+                            )
+
+                            embed.set_footer(
+                                text=f"مرسلة من سيرفر: {message.guild.name}"
+                            )
+
+                            # إرسال النص
+                            await member.send(embed=embed)
+
+                            # إرسال المرفقات
+                            for attachment in message.attachments:
+
+                                await member.send(
+                                    attachment.url
+                                )
+
                             sent += 1
 
-                            # تأخير بسيط
+                            # تأخير لتجنب Rate Limit
                             await asyncio.sleep(1)
 
                         except:
 
                             failed += 1
 
+                    # تعديل رسالة التحميل
                     await loading.edit(
 
                         content=(
-                            f"✅ تم إرسال الرسالة لـ {sent} عضو\n"
-                            f"❌ فشل الإرسال لـ {failed} عضو"
+                            "✅ انتهى الإرسال بنجاح\n\n"
+                            f"📨 تم الإرسال إلى: {sent} عضو\n"
+                            f"❌ فشل الإرسال إلى: {failed} عضو"
                         )
 
                     )
 
                     break
 
-                # رفض
-                elif reply.content.lower() in ["لا", "no", "n"]:
+                # ===============================
+                # الرفض
+                # ===============================
+
+                elif reply.content.lower() in [
+                    "لا",
+                    "no",
+                    "n"
+                ]:
 
                     await message.channel.send(
-                        "❌ تم إلغاء الإرسال"
+                        "❌ تم إلغاء عملية الإرسال."
                     )
 
                     break
 
-                # اذا كتب شيء غلط
+                # ===============================
+                # إدخال خاطئ
+                # ===============================
+
                 else:
 
                     await message.channel.send(
-                        "❌ اكتب فقط نعم أو لا"
+                        "⚠️ الرجاء كتابة نعم أو لا فقط."
                     )
 
         except asyncio.TimeoutError:
 
             await message.channel.send(
-                "⌛ انتهى وقت التأكيد"
+                "⌛ انتهى وقت التأكيد."
             )
 
     await bot.process_commands(message)
