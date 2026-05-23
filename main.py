@@ -5,63 +5,65 @@ from threading import Thread
 import os
 import asyncio
 
-# =========================================
+# ==================================================
 # Flask Keep Alive
-# =========================================
+# ==================================================
 
 app = Flask(__name__)
 
-@app.route('/')
+@app.route("/")
 def home():
-    return "✅ Bot is running successfully"
+    return "✅ Broadcast Bot Online"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
 
 def keep_alive():
-    Thread(target=run_web).start()
+    t = Thread(target=run_web)
+    t.start()
 
-# =========================================
+# ==================================================
 # إعدادات البوت
-# =========================================
+# ==================================================
 
 TOKEN = os.getenv("TOKEN")
 
-# روم الإرسال
+# ايدي روم البرودكاست
 CHANNEL_ID = 1507516304716992654
 
-intents = discord.Intents.all()
+intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.guilds = True
 
 bot = commands.Bot(
     command_prefix="!",
     intents=intents
 )
 
-# =========================================
-# تشغيل البوت
-# =========================================
+# ==================================================
+# عند تشغيل البوت
+# ==================================================
 
 @bot.event
 async def on_ready():
 
-    print("======================================")
-    print(f"✅ Logged in as: {bot.user}")
-    print("🚀 DM Broadcast Bot is Online")
-    print("======================================")
+    print("===================================")
+    print(f"✅ Logged in as {bot.user}")
+    print("🚀 Broadcast Bot Ready")
+    print("===================================")
 
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
-            name="Sending Professional Broadcasts"
+            name="Professional Broadcast System"
         )
     )
 
-# =========================================
+# ==================================================
 # نظام البرودكاست
-# =========================================
+# ==================================================
 
 @bot.event
 async def on_message(message):
@@ -69,10 +71,10 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # التأكد من الروم المحدد
+    # فقط روم البرودكاست
     if message.channel.id == CHANNEL_ID:
 
-        # تجاهل رسائل التأكيد
+        # تجاهل نعم/لا
         if message.content.lower() in [
             "نعم", "لا",
             "yes", "no",
@@ -82,7 +84,7 @@ async def on_message(message):
 
         # رسالة التأكيد
         confirm_embed = discord.Embed(
-            title="📨 تأكيد عملية الإرسال",
+            title="📨 تأكيد البرودكاست",
             description=(
                 "هل تريد إرسال هذه الرسالة إلى جميع أعضاء السيرفر؟\n\n"
                 "✅ اكتب: نعم\n"
@@ -96,7 +98,7 @@ async def on_message(message):
         )
 
         await message.channel.send(
-            content=f"{message.author.mention}",
+            content=message.author.mention,
             embed=confirm_embed
         )
 
@@ -116,9 +118,9 @@ async def on_message(message):
                     check=check
                 )
 
-                # =========================================
-                # الموافقة
-                # =========================================
+                # ==================================================
+                # موافقة
+                # ==================================================
 
                 if reply.content.lower() in [
                     "نعم",
@@ -127,14 +129,29 @@ async def on_message(message):
                 ]:
 
                     loading = await message.channel.send(
-                        "⏳ | جاري إرسال الرسائل الخاصة لجميع الأعضاء..."
+                        "⏳ | جاري تجهيز البرودكاست..."
                     )
 
                     sent = 0
                     failed = 0
 
-                    # جميع أعضاء السيرفر
+                    # تحميل كل الأعضاء
+                    await message.guild.chunk()
+
                     members = message.guild.members
+
+                    total_members = len([
+                        m for m in members if not m.bot
+                    ])
+
+                    await loading.edit(
+
+                        content=(
+                            f"🚀 بدأ الإرسال إلى {total_members} عضو...\n"
+                            f"⏳ الرجاء الانتظار"
+                        )
+
+                    )
 
                     for member in members:
 
@@ -144,13 +161,13 @@ async def on_message(message):
 
                         try:
 
-                            # إنشاء Embed احترافي
+                            # Embed احترافي
                             embed = discord.Embed(
                                 title="📩 رسالة جديدة",
                                 description=(
                                     message.content
                                     if message.content
-                                    else "بدون محتوى نصي"
+                                    else "بدون نص"
                                 ),
                                 color=0x2B2D31
                             )
@@ -161,18 +178,20 @@ async def on_message(message):
                                 inline=False
                             )
 
-                            embed.set_thumbnail(
-                                url=message.guild.icon.url
-                                if message.guild.icon
-                                else discord.Embed.Empty
+                            embed.set_footer(
+                                text="Broadcast System"
                             )
 
-                            embed.set_footer(
-                                text="تم الإرسال عبر نظام البرودكاست"
-                            )
+                            # صورة السيرفر
+                            if message.guild.icon:
+                                embed.set_thumbnail(
+                                    url=message.guild.icon.url
+                                )
 
                             # إرسال الرسالة
-                            await member.send(embed=embed)
+                            await member.send(
+                                embed=embed
+                            )
 
                             # إرسال المرفقات
                             for attachment in message.attachments:
@@ -183,51 +202,73 @@ async def on_message(message):
 
                             sent += 1
 
-                            # تأخير بسيط لتجنب Rate Limit
-                            await asyncio.sleep(0.8)
+                            print(
+                                f"✅ Sent to: {member}"
+                            )
+
+                            # تأخير مهم جدًا ضد الرايت ليمت
+                            await asyncio.sleep(1.5)
 
                         except discord.Forbidden:
 
                             # الخاص مقفل
                             failed += 1
 
-                        except Exception as e:
+                            print(
+                                f"❌ Closed DM: {member}"
+                            )
 
-                            print(f"Error sending to {member}: {e}")
+                        except discord.HTTPException as e:
+
                             failed += 1
 
+                            print(
+                                f"⚠️ HTTP Error -> {member}: {e}"
+                            )
+
+                            # انتظار إضافي لو حصل Rate Limit
+                            await asyncio.sleep(5)
+
+                        except Exception as e:
+
+                            failed += 1
+
+                            print(
+                                f"❌ Unknown Error -> {member}: {e}"
+                            )
+
                     # النتيجة النهائية
-                    done_embed = discord.Embed(
-                        title="✅ اكتملت عملية الإرسال",
+                    result_embed = discord.Embed(
+                        title="✅ انتهى البرودكاست",
                         color=0x57F287
                     )
 
-                    done_embed.add_field(
-                        name="📨 تم الإرسال إلى",
-                        value=f"{sent} عضو",
+                    result_embed.add_field(
+                        name="📨 تم الإرسال بنجاح",
+                        value=f"{sent}",
                         inline=True
                     )
 
-                    done_embed.add_field(
-                        name="❌ فشل الإرسال إلى",
-                        value=f"{failed} عضو",
+                    result_embed.add_field(
+                        name="❌ فشل الإرسال",
+                        value=f"{failed}",
                         inline=True
                     )
 
-                    done_embed.set_footer(
-                        text="Broadcast System Finished Successfully"
+                    result_embed.set_footer(
+                        text="Broadcast Completed Successfully"
                     )
 
                     await loading.edit(
                         content=None,
-                        embed=done_embed
+                        embed=result_embed
                     )
 
                     break
 
-                # =========================================
-                # الرفض
-                # =========================================
+                # ==================================================
+                # رفض
+                # ==================================================
 
                 elif reply.content.lower() in [
                     "لا",
@@ -236,8 +277,8 @@ async def on_message(message):
                 ]:
 
                     cancel_embed = discord.Embed(
-                        title="❌ تم إلغاء العملية",
-                        description="تم إلغاء إرسال البرودكاست بنجاح.",
+                        title="❌ تم إلغاء البرودكاست",
+                        description="تم إلغاء عملية الإرسال بنجاح.",
                         color=0xED4245
                     )
 
@@ -247,27 +288,27 @@ async def on_message(message):
 
                     break
 
-                # =========================================
+                # ==================================================
                 # إدخال خاطئ
-                # =========================================
+                # ==================================================
 
                 else:
 
-                    warn_embed = discord.Embed(
+                    error_embed = discord.Embed(
                         title="⚠️ إدخال غير صحيح",
                         description="الرجاء كتابة نعم أو لا فقط.",
                         color=0xFEE75C
                     )
 
                     await message.channel.send(
-                        embed=warn_embed
+                        embed=error_embed
                     )
 
         except asyncio.TimeoutError:
 
             timeout_embed = discord.Embed(
                 title="⌛ انتهى الوقت",
-                description="لم يتم استلام رد خلال 30 ثانية.",
+                description="لم يتم الرد خلال 30 ثانية.",
                 color=0xED4245
             )
 
@@ -277,9 +318,9 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# =========================================
+# ==================================================
 # تشغيل البوت
-# =========================================
+# ==================================================
 
 keep_alive()
 bot.run(TOKEN)
