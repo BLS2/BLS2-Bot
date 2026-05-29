@@ -1,17 +1,20 @@
 python
 import discord
 from discord.ext import commands
-from discord import app_commands
 from discord.ui import View, Button
-import re
+from flask import Flask
+from threading import Thread
 from datetime import timedelta
+import os
+import re
 
-# =========================
+# ==========================================
 # إعدادات البوت
-# =========================
+# ==========================================
 
-TOKEN = "حط_توكن_البوت"
+TOKEN = os.getenv("TOKEN")
 
+# ايدي السيرفر
 GUILD_ID = 000000000000000000
 
 # روم مراقبة الروابط
@@ -20,18 +23,36 @@ LINK_ROOM_ID = 1487001594300989461
 # روم الانذارات
 WARN_ROOM_ID = 1479608600350429194
 
-# روم التكتات
-TICKET_CHANNEL_ID = 000000000000000000
+# كاتقوري التكتات
+TICKET_CATEGORY_ID = 1487848330804330699
 
-# رتبة الادارة الي تشوف التكتات
+# رتبة الادارة
 STAFF_ROLE_ID = 000000000000000000
 
-# ايدي الشخص الي تبيه يتمنشن داخل التكت
+# ايدي الشخص الي ينمنشن
 OWNER_ID = 1354946253623922738
 
-# =========================
-# تشغيل البوت
-# =========================
+# ==========================================
+# تشغيل Flask
+# ==========================================
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.start()
+
+# ==========================================
+# إعدادات البوت
+# ==========================================
 
 intents = discord.Intents.all()
 
@@ -40,17 +61,21 @@ bot = commands.Bot(
     intents=intents
 )
 
-tree = bot.tree
-
-# =========================
+# ==========================================
 # كشف روابط الدسكورد
-# =========================
+# ==========================================
 
-discord_link_regex = r"(discord\.gg\/|discord\.com\/invite\/)"
+discord_link_regex = r"(discord\.gg\/|discord\.com\/invite\/|discordapp\.com\/invite\/)"
 
-# =========================
-# رسالة الانذار
-# =========================
+# ==========================================
+# المحظورين من فتح التكت
+# ==========================================
+
+blacklisted_users = set()
+
+# ==========================================
+# إرسال الانذار
+# ==========================================
 
 async def send_warning(member, duration_text):
 
@@ -58,78 +83,41 @@ async def send_warning(member, duration_text):
 
     embed = discord.Embed(
         title="🚨 تـنـبـيـه إداري",
-        description=(
-            f"### العضو المخالف:\n"
-            f"{member.mention}\n\n"
-            f"### نوع المخالفة:\n"
-            f"رابط دسكورد\n\n"
-            f"### المدة:\n"
-            f"{duration_text}\n\n"
-            f"|| <@{OWNER_ID}> ||\n"
-            f"سبب التايم اوت ارسال رابط"
-        ),
         color=discord.Color.red()
     )
 
-    embed.set_thumbnail(
-        url=member.guild.icon.url if member.guild.icon else None
+    embed.description = (
+        f"﷽\n\n"
+        f"**العضو المخالف:**\n"
+        f"{member.mention}\n\n"
+        f"**نوع المخالفة:**\n"
+        f"رابط دسكورد\n\n"
+        f"**المدة:**\n"
+        f"{duration_text}\n\n"
+        f"|| <@{OWNER_ID}> ||\n"
+        f"سبب التايم اوت ارسال رابط"
     )
+
+    if member.guild.icon:
+        embed.set_thumbnail(url=member.guild.icon.url)
 
     embed.set_footer(text="نظام الانذارات")
 
     await channel.send(embed=embed)
 
-# =========================
-# مراقبة الرسائل
-# =========================
-
-@bot.event
-async def on_message(message):
-
-    if message.author.bot:
-        return
-
-    if message.channel.id == LINK_ROOM_ID:
-
-        if re.search(discord_link_regex, message.content):
-
-            try:
-
-                timeout_duration = timedelta(days=7)
-
-                await message.author.timeout(
-                    timeout_duration,
-                    reason="ارسال رابط دسكورد"
-                )
-
-                await send_warning(
-                    message.author,
-                    "اسبوع"
-                )
-
-                await message.reply(
-                    "تم اعطائك تايم اوت بسبب ارسال رابط دسكورد"
-                )
-
-            except Exception as e:
-                print(e)
-
-    await bot.process_commands(message)
-
-# =========================
-# رسالة الباند
-# =========================
+# ==========================================
+# أزرار التكت
+# ==========================================
 
 class TicketView(View):
 
-    def __init__(self, banned_user_id):
+    def __init__(self):
         super().__init__(timeout=None)
-
-        self.banned_user_id = banned_user_id
 
     @discord.ui.button(
         label="فتح تكت",
-        style=discord.ButtonStyle.green
+        style=discord.ButtonStyle.green,
+        custom_id="open_ticket"
     )
     async def open_ticket(
         self,
@@ -137,23 +125,35 @@ class TicketView(View):
         button: Button
     ):
 
-        guild = bot.get_guild(GUILD_ID)
+        if interaction.user.id in blacklisted_users:
 
-        existing = discord.utils.get(
+            await interaction.response.send_message(
+                "تم رفض طلب فك الباند مسبقا",
+                ephemeral=True
+            )
+            return
+
+        guild = interaction.guild
+
+        existing_ticket = discord.utils.get(
             guild.text_channels,
             name=f"ban-ticket-{interaction.user.id}"
         )
 
-        if existing:
+        if existing_ticket:
+
             await interaction.response.send_message(
                 "عندك تكت مفتوح بالفعل",
                 ephemeral=True
             )
             return
 
+        category = guild.get_channel(TICKET_CATEGORY_ID)
+
         staff_role = guild.get_role(STAFF_ROLE_ID)
 
         overwrites = {
+
             guild.default_role: discord.PermissionOverwrite(
                 view_channel=False
             ),
@@ -171,12 +171,10 @@ class TicketView(View):
             )
         }
 
-        category = bot.get_channel(TICKET_CHANNEL_ID)
-
         ticket_channel = await guild.create_text_channel(
             name=f"ban-ticket-{interaction.user.id}",
-            overwrites=overwrites,
-            category=category
+            category=category,
+            overwrites=overwrites
         )
 
         embed = discord.Embed(
@@ -194,13 +192,14 @@ class TicketView(View):
         )
 
         await interaction.response.send_message(
-            f"تم فتح التكت: {ticket_channel.mention}",
+            f"تم فتح التكت {ticket_channel.mention}",
             ephemeral=True
         )
 
     @discord.ui.button(
         label="رفض فك الباند",
-        style=discord.ButtonStyle.red
+        style=discord.ButtonStyle.red,
+        custom_id="deny_unban"
     )
     async def deny_unban(
         self,
@@ -208,14 +207,27 @@ class TicketView(View):
         button: Button
     ):
 
+        blacklisted_users.add(interaction.user.id)
+
         await interaction.response.send_message(
             "تم رفض طلب فك الباند",
             ephemeral=True
         )
 
-# =========================
+# ==========================================
+# عند تشغيل البوت
+# ==========================================
+
+@bot.event
+async def on_ready():
+
+    print(f"تم تشغيل البوت | {bot.user}")
+
+    bot.add_view(TicketView())
+
+# ==========================================
 # عند الباند
-# =========================
+# ==========================================
 
 @bot.event
 async def on_member_ban(guild, user):
@@ -224,23 +236,23 @@ async def on_member_ban(guild, user):
 
         embed = discord.Embed(
             title="🚫 تم تبنيدك",
-            description=(
-                "اذا حاب تفك الباند اضغط الزر تحت"
-            ),
+            description="اذا حاب تفك الباند اضغط الزر تحت",
             color=discord.Color.red()
         )
 
+        view = TicketView()
+
         await user.send(
             embed=embed,
-            view=TicketView(user.id)
+            view=view
         )
 
     except:
         pass
 
-# =========================
-# نسخ الرسائل داخل التكت
-# =========================
+# ==========================================
+# مراقبة الرسائل
+# ==========================================
 
 @bot.event
 async def on_message(message):
@@ -248,18 +260,30 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    # ======================================
+    # نقل رسائل التكت
+    # ======================================
+
     if message.channel.name.startswith("ban-ticket-"):
 
         await message.channel.send(
-            f"<@{OWNER_ID}> الرسالة الجديدة من {message.author.mention}"
+            f"<@{OWNER_ID}> رسالة جديدة من {message.author.mention}"
         )
 
-    # فحص روابط الدسكورد
+    # ======================================
+    # كشف روابط الدسكورد
+    # ======================================
+
     if message.channel.id == LINK_ROOM_ID:
+
+        if message.author.guild_permissions.administrator:
+            return
 
         if re.search(discord_link_regex, message.content):
 
             try:
+
+                await message.delete()
 
                 timeout_duration = timedelta(days=7)
 
@@ -273,8 +297,8 @@ async def on_message(message):
                     "اسبوع"
                 )
 
-                await message.reply(
-                    "تم اعطائك تايم اوت بسبب ارسال رابط دسكورد"
+                await message.channel.send(
+                    f"{message.author.mention} تم اعطائك تايم اوت بسبب ارسال رابط"
                 )
 
             except Exception as e:
@@ -282,9 +306,9 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# =========================
-# امر اغلاق التكت
-# =========================
+# ==========================================
+# اغلاق التكت
+# ==========================================
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -296,20 +320,11 @@ async def close(ctx):
 
         await ctx.channel.delete()
 
-# =========================
+# ==========================================
 # تشغيل البوت
-# =========================
+# ==========================================
 
-@bot.event
-async def on_ready():
-
-    print(f"تم تشغيل البوت | {bot.user}")
-
-    try:
-        synced = await tree.sync()
-        print(f"تم مزامنة {len(synced)} امر")
-    except Exception as e:
-        print(e)
+keep_alive()
 
 bot.run(TOKEN)
 
