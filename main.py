@@ -1,69 +1,87 @@
+python
 import discord
 from discord.ext import commands
-from flask import Flask
-from threading import Thread
-import os
-import asyncio
+from discord import app_commands
+from discord.ui import View, Button
+import re
+from datetime import timedelta
 
-# ==================================================
-# Flask Keep Alive
-# ==================================================
-
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "✅ Broadcast Bot Online"
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-def keep_alive():
-    t = Thread(target=run_web)
-    t.start()
-
-# ==================================================
+# =========================
 # إعدادات البوت
-# ==================================================
+# =========================
 
-TOKEN = os.getenv("TOKEN")
+TOKEN = "حط_توكن_البوت"
 
-# ايدي روم البرودكاست
-CHANNEL_ID = 1507516304716992654
+GUILD_ID = 000000000000000000
 
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.guilds = True
+# روم مراقبة الروابط
+LINK_ROOM_ID = 1487001594300989461
+
+# روم الانذارات
+WARN_ROOM_ID = 1479608600350429194
+
+# روم التكتات
+TICKET_CHANNEL_ID = 000000000000000000
+
+# رتبة الادارة الي تشوف التكتات
+STAFF_ROLE_ID = 000000000000000000
+
+# ايدي الشخص الي تبيه يتمنشن داخل التكت
+OWNER_ID = 1354946253623922738
+
+# =========================
+# تشغيل البوت
+# =========================
+
+intents = discord.Intents.all()
 
 bot = commands.Bot(
     command_prefix="!",
     intents=intents
 )
 
-# ==================================================
-# عند تشغيل البوت
-# ==================================================
+tree = bot.tree
 
-@bot.event
-async def on_ready():
+# =========================
+# كشف روابط الدسكورد
+# =========================
 
-    print("===================================")
-    print(f"✅ Logged in as {bot.user}")
-    print("🚀 Broadcast Bot Ready")
-    print("===================================")
+discord_link_regex = r"(discord\.gg\/|discord\.com\/invite\/)"
 
-    await bot.change_presence(
-        activity=discord.Activity(
-            type=discord.ActivityType.watching,
-            name="Professional Broadcast System"
-        )
+# =========================
+# رسالة الانذار
+# =========================
+
+async def send_warning(member, duration_text):
+
+    channel = bot.get_channel(WARN_ROOM_ID)
+
+    embed = discord.Embed(
+        title="🚨 تـنـبـيـه إداري",
+        description=(
+            f"### العضو المخالف:\n"
+            f"{member.mention}\n\n"
+            f"### نوع المخالفة:\n"
+            f"رابط دسكورد\n\n"
+            f"### المدة:\n"
+            f"{duration_text}\n\n"
+            f"|| <@{OWNER_ID}> ||\n"
+            f"سبب التايم اوت ارسال رابط"
+        ),
+        color=discord.Color.red()
     )
 
-# ==================================================
-# نظام البرودكاست
-# ==================================================
+    embed.set_thumbnail(
+        url=member.guild.icon.url if member.guild.icon else None
+    )
+
+    embed.set_footer(text="نظام الانذارات")
+
+    await channel.send(embed=embed)
+
+# =========================
+# مراقبة الرسائل
+# =========================
 
 @bot.event
 async def on_message(message):
@@ -71,256 +89,227 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # فقط روم البرودكاست
-    if message.channel.id == CHANNEL_ID:
+    if message.channel.id == LINK_ROOM_ID:
 
-        # تجاهل نعم/لا
-        if message.content.lower() in [
-            "نعم", "لا",
-            "yes", "no",
-            "y", "n"
-        ]:
-            return
+        if re.search(discord_link_regex, message.content):
 
-        # رسالة التأكيد
-        confirm_embed = discord.Embed(
-            title="📨 تأكيد البرودكاست",
-            description=(
-                "هل تريد إرسال هذه الرسالة إلى جميع أعضاء السيرفر؟\n\n"
-                "✅ اكتب: نعم\n"
-                "❌ اكتب: لا"
-            ),
-            color=0x5865F2
-        )
+            try:
 
-        confirm_embed.set_footer(
-            text="لديك 30 ثانية للرد"
-        )
+                timeout_duration = timedelta(days=7)
 
-        await message.channel.send(
-            content=message.author.mention,
-            embed=confirm_embed
-        )
-
-        def check(m):
-            return (
-                m.author == message.author
-                and m.channel == message.channel
-            )
-
-        try:
-
-            while True:
-
-                reply = await bot.wait_for(
-                    "message",
-                    timeout=30,
-                    check=check
+                await message.author.timeout(
+                    timeout_duration,
+                    reason="ارسال رابط دسكورد"
                 )
 
-                # ==================================================
-                # موافقة
-                # ==================================================
+                await send_warning(
+                    message.author,
+                    "اسبوع"
+                )
 
-                if reply.content.lower() in [
-                    "نعم",
-                    "yes",
-                    "y"
-                ]:
+                await message.reply(
+                    "تم اعطائك تايم اوت بسبب ارسال رابط دسكورد"
+                )
 
-                    loading = await message.channel.send(
-                        "⏳ | جاري تجهيز البرودكاست..."
-                    )
-
-                    sent = 0
-                    failed = 0
-
-                    # تحميل كل الأعضاء
-                    await message.guild.chunk()
-
-                    members = message.guild.members
-
-                    total_members = len([
-                        m for m in members if not m.bot
-                    ])
-
-                    await loading.edit(
-
-                        content=(
-                            f"🚀 بدأ الإرسال إلى {total_members} عضو...\n"
-                            f"⏳ الرجاء الانتظار"
-                        )
-
-                    )
-
-                    for member in members:
-
-                        # تجاهل البوتات
-                        if member.bot:
-                            continue
-
-                        try:
-
-                            # Embed احترافي
-                            embed = discord.Embed(
-                                title="📩 رسالة جديدة",
-                                description=(
-                                    message.content
-                                    if message.content
-                                    else "بدون نص"
-                                ),
-                                color=0x2B2D31
-                            )
-
-                            embed.add_field(
-                                name="📌 السيرفر",
-                                value=message.guild.name,
-                                inline=False
-                            )
-
-                            embed.set_footer(
-                                text="Broadcast System"
-                            )
-
-                            # صورة السيرفر
-                            if message.guild.icon:
-                                embed.set_thumbnail(
-                                    url=message.guild.icon.url
-                                )
-
-                            # إرسال الرسالة
-                            await member.send(
-                                embed=embed
-                            )
-
-                            # إرسال المرفقات
-                            for attachment in message.attachments:
-
-                                await member.send(
-                                    attachment.url
-                                )
-
-                            sent += 1
-
-                            print(
-                                f"✅ Sent to: {member}"
-                            )
-
-                            # تأخير مهم جدًا ضد الرايت ليمت
-                            await asyncio.sleep(1.5)
-
-                        except discord.Forbidden:
-
-                            # الخاص مقفل
-                            failed += 1
-
-                            print(
-                                f"❌ Closed DM: {member}"
-                            )
-
-                        except discord.HTTPException as e:
-
-                            failed += 1
-
-                            print(
-                                f"⚠️ HTTP Error -> {member}: {e}"
-                            )
-
-                            # انتظار إضافي لو حصل Rate Limit
-                            await asyncio.sleep(5)
-
-                        except Exception as e:
-
-                            failed += 1
-
-                            print(
-                                f"❌ Unknown Error -> {member}: {e}"
-                            )
-
-                    # النتيجة النهائية
-                    result_embed = discord.Embed(
-                        title="✅ انتهى البرودكاست",
-                        color=0x57F287
-                    )
-
-                    result_embed.add_field(
-                        name="📨 تم الإرسال بنجاح",
-                        value=f"{sent}",
-                        inline=True
-                    )
-
-                    result_embed.add_field(
-                        name="❌ فشل الإرسال",
-                        value=f"{failed}",
-                        inline=True
-                    )
-
-                    result_embed.set_footer(
-                        text="Broadcast Completed Successfully"
-                    )
-
-                    await loading.edit(
-                        content=None,
-                        embed=result_embed
-                    )
-
-                    break
-
-                # ==================================================
-                # رفض
-                # ==================================================
-
-                elif reply.content.lower() in [
-                    "لا",
-                    "no",
-                    "n"
-                ]:
-
-                    cancel_embed = discord.Embed(
-                        title="❌ تم إلغاء البرودكاست",
-                        description="تم إلغاء عملية الإرسال بنجاح.",
-                        color=0xED4245
-                    )
-
-                    await message.channel.send(
-                        embed=cancel_embed
-                    )
-
-                    break
-
-                # ==================================================
-                # إدخال خاطئ
-                # ==================================================
-
-                else:
-
-                    error_embed = discord.Embed(
-                        title="⚠️ إدخال غير صحيح",
-                        description="الرجاء كتابة نعم أو لا فقط.",
-                        color=0xFEE75C
-                    )
-
-                    await message.channel.send(
-                        embed=error_embed
-                    )
-
-        except asyncio.TimeoutError:
-
-            timeout_embed = discord.Embed(
-                title="⌛ انتهى الوقت",
-                description="لم يتم الرد خلال 30 ثانية.",
-                color=0xED4245
-            )
-
-            await message.channel.send(
-                embed=timeout_embed
-            )
+            except Exception as e:
+                print(e)
 
     await bot.process_commands(message)
 
-# ==================================================
-# تشغيل البوت
-# ==================================================
+# =========================
+# رسالة الباند
+# =========================
 
-keep_alive()
+class TicketView(View):
+
+    def __init__(self, banned_user_id):
+        super().__init__(timeout=None)
+
+        self.banned_user_id = banned_user_id
+
+    @discord.ui.button(
+        label="فتح تكت",
+        style=discord.ButtonStyle.green
+    )
+    async def open_ticket(
+        self,
+        interaction: discord.Interaction,
+        button: Button
+    ):
+
+        guild = bot.get_guild(GUILD_ID)
+
+        existing = discord.utils.get(
+            guild.text_channels,
+            name=f"ban-ticket-{interaction.user.id}"
+        )
+
+        if existing:
+            await interaction.response.send_message(
+                "عندك تكت مفتوح بالفعل",
+                ephemeral=True
+            )
+            return
+
+        staff_role = guild.get_role(STAFF_ROLE_ID)
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(
+                view_channel=False
+            ),
+
+            interaction.user: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True
+            ),
+
+            staff_role: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True
+            )
+        }
+
+        category = bot.get_channel(TICKET_CHANNEL_ID)
+
+        ticket_channel = await guild.create_text_channel(
+            name=f"ban-ticket-{interaction.user.id}",
+            overwrites=overwrites,
+            category=category
+        )
+
+        embed = discord.Embed(
+            title="📩 تكت فك باند",
+            description=(
+                f"{interaction.user.mention}\n\n"
+                f"الان اي رسالة ترسلها هنا الادارة بتشوفها"
+            ),
+            color=discord.Color.red()
+        )
+
+        await ticket_channel.send(
+            content=f"<@&{STAFF_ROLE_ID}>",
+            embed=embed
+        )
+
+        await interaction.response.send_message(
+            f"تم فتح التكت: {ticket_channel.mention}",
+            ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="رفض فك الباند",
+        style=discord.ButtonStyle.red
+    )
+    async def deny_unban(
+        self,
+        interaction: discord.Interaction,
+        button: Button
+    ):
+
+        await interaction.response.send_message(
+            "تم رفض طلب فك الباند",
+            ephemeral=True
+        )
+
+# =========================
+# عند الباند
+# =========================
+
+@bot.event
+async def on_member_ban(guild, user):
+
+    try:
+
+        embed = discord.Embed(
+            title="🚫 تم تبنيدك",
+            description=(
+                "اذا حاب تفك الباند اضغط الزر تحت"
+            ),
+            color=discord.Color.red()
+        )
+
+        await user.send(
+            embed=embed,
+            view=TicketView(user.id)
+        )
+
+    except:
+        pass
+
+# =========================
+# نسخ الرسائل داخل التكت
+# =========================
+
+@bot.event
+async def on_message(message):
+
+    if message.author.bot:
+        return
+
+    if message.channel.name.startswith("ban-ticket-"):
+
+        await message.channel.send(
+            f"<@{OWNER_ID}> الرسالة الجديدة من {message.author.mention}"
+        )
+
+    # فحص روابط الدسكورد
+    if message.channel.id == LINK_ROOM_ID:
+
+        if re.search(discord_link_regex, message.content):
+
+            try:
+
+                timeout_duration = timedelta(days=7)
+
+                await message.author.timeout(
+                    timeout_duration,
+                    reason="ارسال رابط دسكورد"
+                )
+
+                await send_warning(
+                    message.author,
+                    "اسبوع"
+                )
+
+                await message.reply(
+                    "تم اعطائك تايم اوت بسبب ارسال رابط دسكورد"
+                )
+
+            except Exception as e:
+                print(e)
+
+    await bot.process_commands(message)
+
+# =========================
+# امر اغلاق التكت
+# =========================
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def close(ctx):
+
+    if ctx.channel.name.startswith("ban-ticket-"):
+
+        await ctx.send("تم اغلاق التكت")
+
+        await ctx.channel.delete()
+
+# =========================
+# تشغيل البوت
+# =========================
+
+@bot.event
+async def on_ready():
+
+    print(f"تم تشغيل البوت | {bot.user}")
+
+    try:
+        synced = await tree.sync()
+        print(f"تم مزامنة {len(synced)} امر")
+    except Exception as e:
+        print(e)
+
 bot.run(TOKEN)
+
