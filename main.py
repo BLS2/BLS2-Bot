@@ -1,20 +1,41 @@
 import discord
 from discord.ext import commands
 from discord.ui import View, Modal, TextInput
+from flask import Flask
+from threading import Thread
 import datetime
 import os
 
-TOKEN = os.getenv("TOKEN")
+# ===============================
+# Flask
+# ===============================
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot Online"
+
+def run_web():
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000))
+    )
+
+def keep_alive():
+    Thread(target=run_web).start()
 
 # ===============================
-# الإعدادات
+# Settings
 # ===============================
+
+TOKEN = os.getenv("TOKEN")
 
 REVIEW_CHANNEL = 148144370438334058
 REVIEW_ROLE = 1507511064399577098
 
 # ===============================
-# البوت
+# Bot
 # ===============================
 
 intents = discord.Intents.all()
@@ -25,30 +46,26 @@ bot = commands.Bot(
 )
 
 # ===============================
-# النجوم
+# Stars
 # ===============================
 
-def stars(amount):
-    return "⭐" * amount
+def stars(number):
+    return "⭐" * number
 
 # ===============================
-# مودال التقييم
+# Review Modal
 # ===============================
 
 class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
 
     product = TextInput(
-        label="تقييم المنتج (1-10)",
-        placeholder="اكتب رقم من 1 إلى 10",
-        required=True,
-        max_length=2
+        label="تقييم المنتج من 1 إلى 10",
+        placeholder="مثال: 10"
     )
 
     service = TextInput(
-        label="تقييم الخدمة (1-10)",
-        placeholder="اكتب رقم من 1 إلى 10",
-        required=True,
-        max_length=2
+        label="تقييم الخدمة من 1 إلى 10",
+        placeholder="مثال: 10"
     )
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -59,19 +76,19 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
 
         except:
             return await interaction.response.send_message(
-                "❌ يجب كتابة أرقام فقط.",
+                "❌ يجب إدخال أرقام فقط",
                 ephemeral=True
             )
 
-        if not 1 <= product_score <= 10:
+        if product_score < 1 or product_score > 10:
             return await interaction.response.send_message(
-                "❌ تقييم المنتج يجب أن يكون بين 1 و 10.",
+                "❌ تقييم المنتج يجب أن يكون بين 1 و 10",
                 ephemeral=True
             )
 
-        if not 1 <= service_score <= 10:
+        if service_score < 1 or service_score > 10:
             return await interaction.response.send_message(
-                "❌ تقييم الخدمة يجب أن يكون بين 1 و 10.",
+                "❌ تقييم الخدمة يجب أن يكون بين 1 و 10",
                 ephemeral=True
             )
 
@@ -94,28 +111,24 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
 
         embed.add_field(
             name="🏆 تقييم المنتج",
-            value=f"{stars(product_score)}\n**{product_score}/10**",
+            value=f"{stars(product_score)}\n{product_score}/10",
             inline=False
         )
 
         embed.add_field(
             name="💎 تقييم الخدمة",
-            value=f"{stars(service_score)}\n**{service_score}/10**",
+            value=f"{stars(service_score)}\n{service_score}/10",
             inline=False
         )
 
         embed.add_field(
             name="📊 التقييم النهائي",
-            value=f"**{average}/10**",
+            value=f"{average}/10",
             inline=False
         )
 
         embed.set_thumbnail(
             url=interaction.user.display_avatar.url
-        )
-
-        embed.set_footer(
-            text=f"تم التقييم بواسطة {interaction.user}"
         )
 
         channel = bot.get_channel(REVIEW_CHANNEL)
@@ -132,12 +145,12 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
             await interaction.user.remove_roles(role)
 
         await interaction.response.send_message(
-            "✅ تم إرسال تقييمك بنجاح.",
+            "✅ تم إرسال تقييمك بنجاح",
             ephemeral=True
         )
 
 # ===============================
-# زر التقييم
+# Review Button
 # ===============================
 
 class ReviewView(View):
@@ -161,7 +174,7 @@ class ReviewView(View):
             for role in interaction.user.roles
         ):
             return await interaction.response.send_message(
-                "❌ لا تملك صلاحية التقييم.",
+                "❌ لا تملك صلاحية التقييم",
                 ephemeral=True
             )
 
@@ -170,7 +183,7 @@ class ReviewView(View):
         )
 
 # ===============================
-# إرسال لوحة التقييم
+# Command
 # ===============================
 
 @bot.command()
@@ -179,17 +192,9 @@ async def reviewpanel(ctx):
 
     embed = discord.Embed(
         title="⭐ تقييم العملاء",
-        description=(
-            "نرحب بتقييمكم لخدماتنا.\n\n"
-            "اضغط الزر بالأسفل لتقييم المنتج والخدمة."
-        ),
+        description="اضغط الزر بالأسفل لتقييم المنتج والخدمة",
         color=0xFFD700
     )
-
-    if ctx.guild.icon:
-        embed.set_thumbnail(
-            url=ctx.guild.icon.url
-        )
 
     await ctx.send(
         embed=embed,
@@ -197,16 +202,22 @@ async def reviewpanel(ctx):
     )
 
 # ===============================
-# تشغيل البوت
+# Ready
 # ===============================
 
 @bot.event
 async def on_ready():
 
-    print(f"✅ Logged in as {bot.user}")
+    print(f"Logged in as {bot.user}")
 
     bot.add_view(
         ReviewView()
     )
+
+# ===============================
+# Run
+# ===============================
+
+keep_alive()
 
 bot.run(TOKEN)
