@@ -29,7 +29,9 @@ def keep_alive():
 
 TOKEN = os.getenv("TOKEN")
 
-REVIEW_CHANNEL = 148144370438334058
+# ✅ تم التعديل هنا
+REVIEW_CHANNEL = 1481443704383340585
+
 REVIEW_ROLE = 1507511064399577098
 
 
@@ -100,7 +102,6 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
 
         channel = interaction.guild.get_channel(REVIEW_CHANNEL)
 
-        # رتبة المتجر
         store_role = discord.utils.get(
             interaction.user.roles,
             id=REVIEW_ROLE
@@ -145,6 +146,7 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
         )
 
         embed.set_thumbnail(url=interaction.user.display_avatar.url)
+
         embed.set_author(
             name=str(interaction.user),
             icon_url=interaction.user.display_avatar.url
@@ -167,7 +169,7 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
 
 
 # =====================================
-# Review Button
+# View
 # =====================================
 
 class ReviewView(View):
