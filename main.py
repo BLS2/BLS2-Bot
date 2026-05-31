@@ -6,9 +6,9 @@ from threading import Thread
 import datetime
 import os
 
-# ===============================
+# =====================================
 # Flask
-# ===============================
+# =====================================
 
 app = Flask(__name__)
 
@@ -25,18 +25,18 @@ def run_web():
 def keep_alive():
     Thread(target=run_web).start()
 
-# ===============================
+# =====================================
 # Settings
-# ===============================
+# =====================================
 
 TOKEN = os.getenv("TOKEN")
 
 REVIEW_CHANNEL = 148144370438334058
 REVIEW_ROLE = 1507511064399577098
 
-# ===============================
+# =====================================
 # Bot
-# ===============================
+# =====================================
 
 intents = discord.Intents.all()
 
@@ -45,28 +45,28 @@ bot = commands.Bot(
     intents=intents
 )
 
-# ===============================
+# =====================================
 # Stars
-# ===============================
+# =====================================
 
-def stars(count):
-    return "⭐" * count
+def stars(amount):
+    return "⭐" * amount
 
-# ===============================
+# =====================================
 # Review Modal
-# ===============================
+# =====================================
 
 class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
 
     product = TextInput(
-        label="تقييم المنتج (1-10)",
+        label="تقييم المنتج (1 - 10)",
         placeholder="مثال: 10",
         required=True,
         max_length=2
     )
 
     service = TextInput(
-        label="تقييم الخدمة (1-10)",
+        label="تقييم الخدمة (1 - 10)",
         placeholder="مثال: 10",
         required=True,
         max_length=2
@@ -84,13 +84,13 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
                 ephemeral=True
             )
 
-        if product_score < 1 or product_score > 10:
+        if not 1 <= product_score <= 10:
             return await interaction.response.send_message(
                 "❌ تقييم المنتج يجب أن يكون بين 1 و 10",
                 ephemeral=True
             )
 
-        if service_score < 1 or service_score > 10:
+        if not 1 <= service_score <= 10:
             return await interaction.response.send_message(
                 "❌ تقييم الخدمة يجب أن يكون بين 1 و 10",
                 ephemeral=True
@@ -101,77 +101,55 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
             1
         )
 
-        review_channel = bot.get_channel(
+        channel = interaction.guild.get_channel(
             REVIEW_CHANNEL
         )
 
         embed = discord.Embed(
-            title="📊 تم التقييم",
+            title="⭐ تقييم عميل جديد",
+            description=(
+                f"**👤 العميل:** {interaction.user.mention}\n\n"
+                f"**📦 تقييم المنتج**\n"
+                f"{stars(product_score)}\n"
+                f"**{product_score}/10**\n\n"
+                f"**💎 تقييم الخدمة**\n"
+                f"{stars(service_score)}\n"
+                f"**{service_score}/10**\n\n"
+                f"**🏆 التقييم النهائي**\n"
+                f"**{average}/10**"
+            ),
             color=0xFFD700,
             timestamp=datetime.datetime.now(datetime.UTC)
-        )
-
-        embed.add_field(
-            name="👤 المستخدم",
-            value=interaction.user.mention,
-            inline=False
-        )
-
-        embed.add_field(
-            name="📦 تقييم المنتج",
-            value=f"{product_score}/10\n{stars(product_score)}",
-            inline=False
-        )
-
-        embed.add_field(
-            name="💎 تقييم الخدمة",
-            value=f"{service_score}/10\n{stars(service_score)}",
-            inline=False
-        )
-
-        embed.add_field(
-            name="🎯 التقييم النهائي",
-            value=f"{average}/10",
-            inline=False
         )
 
         embed.set_thumbnail(
             url=interaction.user.display_avatar.url
         )
 
-        embed.set_footer(
-            text="BLS Reviews System"
+        embed.set_author(
+            name=str(interaction.user),
+            icon_url=interaction.user.display_avatar.url
         )
 
-        if review_channel:
+        embed.set_footer(
+            text=f"{interaction.guild.name} • Reviews System"
+        )
 
-            await review_channel.send(
-                content=f"{interaction.user.mention}",
+        if channel:
+
+            await channel.send(
+                content=f"📢 تقييم جديد من {interaction.user.mention}",
                 embed=embed
             )
-
-        role = interaction.guild.get_role(
-            REVIEW_ROLE
-        )
-
-        if role and role in interaction.user.roles:
-
-            try:
-                await interaction.user.remove_roles(
-                    role,
-                    reason="Used Review System"
-                )
-            except:
-                pass
 
         await interaction.response.send_message(
             "✅ تم إرسال تقييمك بنجاح",
             ephemeral=True
         )
 
-# ===============================
-# Button
-# ===============================
+# =====================================
+# Review Button
+# =====================================
 
 class ReviewView(View):
 
@@ -202,9 +180,9 @@ class ReviewView(View):
             ReviewModal()
         )
 
-# ===============================
-# Review Panel Command
-# ===============================
+# =====================================
+# Send Panel
+# =====================================
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -216,19 +194,18 @@ async def reviewpanel(ctx):
         color=0xFFD700
     )
 
-    if ctx.guild.icon:
-        embed.set_thumbnail(
-            url=ctx.guild.icon.url
-        )
+    embed.set_thumbnail(
+        url=ctx.guild.icon.url
+    )
 
     await ctx.send(
         embed=embed,
         view=ReviewView()
     )
 
-# ===============================
+# =====================================
 # Ready
-# ===============================
+# =====================================
 
 @bot.event
 async def on_ready():
@@ -239,11 +216,10 @@ async def on_ready():
         ReviewView()
     )
 
-# ===============================
+# =====================================
 # Run
-# ===============================
+# =====================================
 
 keep_alive()
 
 bot.run(TOKEN)
-
