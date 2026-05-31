@@ -17,13 +17,11 @@ def home():
     return "Review Bot Online"
 
 def run_web():
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000))
-    )
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
 def keep_alive():
     Thread(target=run_web).start()
+
 
 # =====================================
 # Settings
@@ -33,6 +31,7 @@ TOKEN = os.getenv("TOKEN")
 
 REVIEW_CHANNEL = 148144370438334058
 REVIEW_ROLE = 1507511064399577098
+
 
 # =====================================
 # Bot
@@ -45,12 +44,14 @@ bot = commands.Bot(
     intents=intents
 )
 
+
 # =====================================
 # Stars
 # =====================================
 
 def stars(amount):
-    return "⭐" * amount
+    return "⭐" * amount + "☆" * (10 - amount)
+
 
 # =====================================
 # Review Modal
@@ -77,8 +78,7 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
         try:
             product_score = int(self.product.value)
             service_score = int(self.service.value)
-
-        except:
+        except ValueError:
             return await interaction.response.send_message(
                 "❌ يجب إدخال أرقام فقط",
                 ephemeral=True
@@ -96,47 +96,65 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
                 ephemeral=True
             )
 
-        average = round(
-            (product_score + service_score) / 2,
-            1
+        average = round((product_score + service_score) / 2, 1)
+
+        channel = interaction.guild.get_channel(REVIEW_CHANNEL)
+
+        # رتبة المتجر
+        store_role = discord.utils.get(
+            interaction.user.roles,
+            id=REVIEW_ROLE
         )
 
-        channel = interaction.guild.get_channel(
-            REVIEW_CHANNEL
-        )
+        role_name = store_role.mention if store_role else "لا يوجد"
 
         embed = discord.Embed(
-            title="⭐ تقييم عميل جديد",
-            description=(
-                f"**👤 العميل:** {interaction.user.mention}\n\n"
-                f"**📦 تقييم المنتج**\n"
-                f"{stars(product_score)}\n"
-                f"**{product_score}/10**\n\n"
-                f"**💎 تقييم الخدمة**\n"
-                f"{stars(service_score)}\n"
-                f"**{service_score}/10**\n\n"
-                f"**🏆 التقييم النهائي**\n"
-                f"**{average}/10**"
-            ),
+            title="🌟 تقييم جديد",
             color=0xFFD700,
-            timestamp=datetime.datetime.now(datetime.UTC)
+            timestamp=datetime.datetime.utcnow()
         )
 
-        embed.set_thumbnail(
-            url=interaction.user.display_avatar.url
+        embed.add_field(
+            name="👤 العميل",
+            value=interaction.user.mention,
+            inline=False
         )
 
+        embed.add_field(
+            name="🏪 رتبة المتجر",
+            value=role_name,
+            inline=False
+        )
+
+        embed.add_field(
+            name="📦 تقييم المنتج",
+            value=f"{stars(product_score)}\n**{product_score}/10**",
+            inline=False
+        )
+
+        embed.add_field(
+            name="💎 تقييم الخدمة",
+            value=f"{stars(service_score)}\n**{service_score}/10**",
+            inline=False
+        )
+
+        embed.add_field(
+            name="🏆 التقييم النهائي",
+            value=f"**{average}/10**",
+            inline=False
+        )
+
+        embed.set_thumbnail(url=interaction.user.display_avatar.url)
         embed.set_author(
             name=str(interaction.user),
             icon_url=interaction.user.display_avatar.url
         )
 
-        embed.set_footer(
-            text=f"{interaction.guild.name} • Reviews System"
-        )
+        embed.set_image(url=interaction.user.display_avatar.url)
+
+        embed.set_footer(text=f"{interaction.guild.name} • Reviews System")
 
         if channel:
-
             await channel.send(
                 content=f"📢 تقييم جديد من {interaction.user.mention}",
                 embed=embed
@@ -146,6 +164,7 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
             "✅ تم إرسال تقييمك بنجاح",
             ephemeral=True
         )
+
 
 # =====================================
 # Review Button
@@ -161,27 +180,19 @@ class ReviewView(View):
         style=discord.ButtonStyle.success,
         custom_id="review_button"
     )
-    async def review_button(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
+    async def review_button(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        if not any(
-            role.id == REVIEW_ROLE
-            for role in interaction.user.roles
-        ):
+        if not any(role.id == REVIEW_ROLE for role in interaction.user.roles):
             return await interaction.response.send_message(
                 "❌ لا تملك صلاحية التقييم",
                 ephemeral=True
             )
 
-        await interaction.response.send_modal(
-            ReviewModal()
-        )
+        await interaction.response.send_modal(ReviewModal())
+
 
 # =====================================
-# Send Panel
+# Command
 # =====================================
 
 @bot.command()
@@ -190,18 +201,14 @@ async def reviewpanel(ctx):
 
     embed = discord.Embed(
         title="⭐ تقييم العملاء",
-        description="اضغط الزر بالأسفل لتقييم المنتج والخدمة",
+        description="اضغط الزر لتقييم المنتج والخدمة",
         color=0xFFD700
     )
 
-    embed.set_thumbnail(
-        url=ctx.guild.icon.url
-    )
+    embed.set_thumbnail(url=ctx.guild.icon.url)
 
-    await ctx.send(
-        embed=embed,
-        view=ReviewView()
-    )
+    await ctx.send(embed=embed, view=ReviewView())
+
 
 # =====================================
 # Ready
@@ -209,17 +216,13 @@ async def reviewpanel(ctx):
 
 @bot.event
 async def on_ready():
-
     print(f"✅ Logged in as {bot.user}")
+    bot.add_view(ReviewView())
 
-    bot.add_view(
-        ReviewView()
-    )
 
 # =====================================
 # Run
 # =====================================
 
 keep_alive()
-
 bot.run(TOKEN)
