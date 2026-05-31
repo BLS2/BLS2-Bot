@@ -1,57 +1,21 @@
 import discord
 from discord.ext import commands
-from discord.ui import View, Button
-from flask import Flask
-from threading import Thread
-from datetime import timedelta
+from discord.ui import View, Modal, TextInput
+import datetime
 import os
-import re
-
-# ==========================================
-# إعدادات البوت
-# ==========================================
 
 TOKEN = os.getenv("TOKEN")
 
-# ايدي السيرفر
-GUILD_ID = 000000000000000000
+# ===============================
+# الإعدادات
+# ===============================
 
-# روم مراقبة الروابط
-LINK_ROOM_ID = 1487001594300989461
+REVIEW_CHANNEL = 148144370438334058
+REVIEW_ROLE = 1507511064399577098
 
-# روم الانذارات
-WARN_ROOM_ID = 1479608600350429194
-
-# كاتقوري التكتات
-TICKET_CATEGORY_ID = 1487848330804330699
-
-# رتبة الادارة
-STAFF_ROLE_ID = 000000000000000000
-
-# ايدي الشخص الي ينمنشن
-OWNER_ID = 1354946253623922738
-
-# ==========================================
-# تشغيل Flask
-# ==========================================
-
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is running"
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run_web)
-    t.start()
-
-# ==========================================
-# إعدادات البوت
-# ==========================================
+# ===============================
+# البوت
+# ===============================
 
 intents = discord.Intents.all()
 
@@ -60,270 +24,189 @@ bot = commands.Bot(
     intents=intents
 )
 
-# ==========================================
-# كشف روابط الدسكورد
-# ==========================================
+# ===============================
+# النجوم
+# ===============================
 
-discord_link_regex = r"(discord\.gg\/|discord\.com\/invite\/|discordapp\.com\/invite\/)"
+def stars(amount):
+    return "⭐" * amount
 
-# ==========================================
-# المحظورين من فتح التكت
-# ==========================================
+# ===============================
+# مودال التقييم
+# ===============================
 
-blacklisted_users = set()
+class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
 
-# ==========================================
-# إرسال الانذار
-# ==========================================
-
-async def send_warning(member, duration_text):
-
-    channel = bot.get_channel(WARN_ROOM_ID)
-
-    embed = discord.Embed(
-        title="🚨 تـنـبـيـه إداري",
-        color=discord.Color.red()
+    product = TextInput(
+        label="تقييم المنتج (1-10)",
+        placeholder="اكتب رقم من 1 إلى 10",
+        required=True,
+        max_length=2
     )
 
-    embed.description = (
-        f"﷽\n\n"
-        f"**العضو المخالف:**\n"
-        f"{member.mention}\n\n"
-        f"**نوع المخالفة:**\n"
-        f"رابط دسكورد\n\n"
-        f"**المدة:**\n"
-        f"{duration_text}\n\n"
-        f"|| <@{OWNER_ID}> ||\n"
-        f"سبب التايم اوت ارسال رابط"
+    service = TextInput(
+        label="تقييم الخدمة (1-10)",
+        placeholder="اكتب رقم من 1 إلى 10",
+        required=True,
+        max_length=2
     )
 
-    if member.guild.icon:
-        embed.set_thumbnail(url=member.guild.icon.url)
+    async def on_submit(self, interaction: discord.Interaction):
 
-    embed.set_footer(text="نظام الانذارات")
+        try:
+            product_score = int(self.product.value)
+            service_score = int(self.service.value)
 
-    await channel.send(embed=embed)
+        except:
+            return await interaction.response.send_message(
+                "❌ يجب كتابة أرقام فقط.",
+                ephemeral=True
+            )
 
-# ==========================================
-# أزرار التكت
-# ==========================================
+        if not 1 <= product_score <= 10:
+            return await interaction.response.send_message(
+                "❌ تقييم المنتج يجب أن يكون بين 1 و 10.",
+                ephemeral=True
+            )
 
-class TicketView(View):
+        if not 1 <= service_score <= 10:
+            return await interaction.response.send_message(
+                "❌ تقييم الخدمة يجب أن يكون بين 1 و 10.",
+                ephemeral=True
+            )
+
+        average = round(
+            (product_score + service_score) / 2,
+            1
+        )
+
+        embed = discord.Embed(
+            title="⭐ تقييم جديد",
+            color=0xFFD700,
+            timestamp=datetime.datetime.now(datetime.UTC)
+        )
+
+        embed.add_field(
+            name="👤 العميل",
+            value=interaction.user.mention,
+            inline=False
+        )
+
+        embed.add_field(
+            name="🏆 تقييم المنتج",
+            value=f"{stars(product_score)}\n**{product_score}/10**",
+            inline=False
+        )
+
+        embed.add_field(
+            name="💎 تقييم الخدمة",
+            value=f"{stars(service_score)}\n**{service_score}/10**",
+            inline=False
+        )
+
+        embed.add_field(
+            name="📊 التقييم النهائي",
+            value=f"**{average}/10**",
+            inline=False
+        )
+
+        embed.set_thumbnail(
+            url=interaction.user.display_avatar.url
+        )
+
+        embed.set_footer(
+            text=f"تم التقييم بواسطة {interaction.user}"
+        )
+
+        channel = bot.get_channel(REVIEW_CHANNEL)
+
+        if channel:
+            await channel.send(
+                content=interaction.user.mention,
+                embed=embed
+            )
+
+        role = interaction.guild.get_role(REVIEW_ROLE)
+
+        if role and role in interaction.user.roles:
+            await interaction.user.remove_roles(role)
+
+        await interaction.response.send_message(
+            "✅ تم إرسال تقييمك بنجاح.",
+            ephemeral=True
+        )
+
+# ===============================
+# زر التقييم
+# ===============================
+
+class ReviewView(View):
 
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="فتح تكت",
-        style=discord.ButtonStyle.green,
-        custom_id="open_ticket"
+        label="⭐ تقييم المنتج والخدمة",
+        style=discord.ButtonStyle.success,
+        custom_id="review_button"
     )
-    async def open_ticket(
+    async def review_button(
         self,
         interaction: discord.Interaction,
-        button: Button
+        button: discord.ui.Button
     ):
 
-        if interaction.user.id in blacklisted_users:
-
-            await interaction.response.send_message(
-                "تم رفض طلب فك الباند مسبقا",
+        if not any(
+            role.id == REVIEW_ROLE
+            for role in interaction.user.roles
+        ):
+            return await interaction.response.send_message(
+                "❌ لا تملك صلاحية التقييم.",
                 ephemeral=True
             )
-            return
 
-        guild = interaction.guild
-
-        existing_ticket = discord.utils.get(
-            guild.text_channels,
-            name=f"ban-ticket-{interaction.user.id}"
+        await interaction.response.send_modal(
+            ReviewModal()
         )
 
-        if existing_ticket:
+# ===============================
+# إرسال لوحة التقييم
+# ===============================
 
-            await interaction.response.send_message(
-                "عندك تكت مفتوح بالفعل",
-                ephemeral=True
-            )
-            return
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def reviewpanel(ctx):
 
-        category = guild.get_channel(TICKET_CATEGORY_ID)
-
-        staff_role = guild.get_role(STAFF_ROLE_ID)
-
-        overwrites = {
-
-            guild.default_role: discord.PermissionOverwrite(
-                view_channel=False
-            ),
-
-            interaction.user: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True
-            ),
-
-            staff_role: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True
-            )
-        }
-
-        ticket_channel = await guild.create_text_channel(
-            name=f"ban-ticket-{interaction.user.id}",
-            category=category,
-            overwrites=overwrites
-        )
-
-        embed = discord.Embed(
-            title="📩 تكت فك باند",
-            description=(
-                f"{interaction.user.mention}\n\n"
-                f"الان اي رسالة ترسلها هنا الادارة بتشوفها"
-            ),
-            color=discord.Color.red()
-        )
-
-        await ticket_channel.send(
-            content=f"<@&{STAFF_ROLE_ID}>",
-            embed=embed
-        )
-
-        await interaction.response.send_message(
-            f"تم فتح التكت {ticket_channel.mention}",
-            ephemeral=True
-        )
-
-    @discord.ui.button(
-        label="رفض فك الباند",
-        style=discord.ButtonStyle.red,
-        custom_id="deny_unban"
+    embed = discord.Embed(
+        title="⭐ تقييم العملاء",
+        description=(
+            "نرحب بتقييمكم لخدماتنا.\n\n"
+            "اضغط الزر بالأسفل لتقييم المنتج والخدمة."
+        ),
+        color=0xFFD700
     )
-    async def deny_unban(
-        self,
-        interaction: discord.Interaction,
-        button: Button
-    ):
 
-        blacklisted_users.add(interaction.user.id)
-
-        await interaction.response.send_message(
-            "تم رفض طلب فك الباند",
-            ephemeral=True
+    if ctx.guild.icon:
+        embed.set_thumbnail(
+            url=ctx.guild.icon.url
         )
 
-# ==========================================
-# عند تشغيل البوت
-# ==========================================
+    await ctx.send(
+        embed=embed,
+        view=ReviewView()
+    )
+
+# ===============================
+# تشغيل البوت
+# ===============================
 
 @bot.event
 async def on_ready():
 
-    print(f"تم تشغيل البوت | {bot.user}")
+    print(f"✅ Logged in as {bot.user}")
 
-    bot.add_view(TicketView())
-
-# ==========================================
-# عند الباند
-# ==========================================
-
-@bot.event
-async def on_member_ban(guild, user):
-
-    try:
-
-        embed = discord.Embed(
-            title="🚫 تم تبنيدك",
-            description="اذا حاب تفك الباند اضغط الزر تحت",
-            color=discord.Color.red()
-        )
-
-        view = TicketView()
-
-        await user.send(
-            embed=embed,
-            view=view
-        )
-
-    except:
-        pass
-
-# ==========================================
-# مراقبة الرسائل
-# ==========================================
-
-@bot.event
-async def on_message(message):
-
-    if message.author.bot:
-        return
-
-    # ======================================
-    # نقل رسائل التكت
-    # ======================================
-
-    if message.channel.name.startswith("ban-ticket-"):
-
-        await message.channel.send(
-            f"<@{OWNER_ID}> رسالة جديدة من {message.author.mention}"
-        )
-
-    # ======================================
-    # كشف روابط الدسكورد
-    # ======================================
-
-    if message.channel.id == LINK_ROOM_ID:
-
-        if message.author.guild_permissions.administrator:
-            return
-
-        if re.search(discord_link_regex, message.content):
-
-            try:
-
-                await message.delete()
-
-                timeout_duration = timedelta(days=7)
-
-                await message.author.timeout(
-                    timeout_duration,
-                    reason="ارسال رابط دسكورد"
-                )
-
-                await send_warning(
-                    message.author,
-                    "اسبوع"
-                )
-
-                await message.channel.send(
-                    f"{message.author.mention} تم اعطائك تايم اوت بسبب ارسال رابط"
-                )
-
-            except Exception as e:
-                print(e)
-
-    await bot.process_commands(message)
-
-# ==========================================
-# اغلاق التكت
-# ==========================================
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def close(ctx):
-
-    if ctx.channel.name.startswith("ban-ticket-"):
-
-        await ctx.send("تم اغلاق التكت")
-
-        await ctx.channel.delete()
-
-# ==========================================
-# تشغيل البوت
-# ==========================================
-
-keep_alive()
+    bot.add_view(
+        ReviewView()
+    )
 
 bot.run(TOKEN)
-
