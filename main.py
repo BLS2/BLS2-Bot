@@ -14,7 +14,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot Online"
+    return "Review Bot Online"
 
 def run_web():
     app.run(
@@ -49,8 +49,8 @@ bot = commands.Bot(
 # Stars
 # ===============================
 
-def stars(number):
-    return "⭐" * number
+def stars(count):
+    return "⭐" * count
 
 # ===============================
 # Review Modal
@@ -59,13 +59,17 @@ def stars(number):
 class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
 
     product = TextInput(
-        label="تقييم المنتج من 1 إلى 10",
-        placeholder="مثال: 10"
+        label="تقييم المنتج (1-10)",
+        placeholder="مثال: 10",
+        required=True,
+        max_length=2
     )
 
     service = TextInput(
-        label="تقييم الخدمة من 1 إلى 10",
-        placeholder="مثال: 10"
+        label="تقييم الخدمة (1-10)",
+        placeholder="مثال: 10",
+        required=True,
+        max_length=2
     )
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -97,32 +101,36 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
             1
         )
 
+        review_channel = bot.get_channel(
+            REVIEW_CHANNEL
+        )
+
         embed = discord.Embed(
-            title="⭐ تقييم جديد",
+            title="📊 تم التقييم",
             color=0xFFD700,
             timestamp=datetime.datetime.now(datetime.UTC)
         )
 
         embed.add_field(
-            name="👤 العميل",
+            name="👤 المستخدم",
             value=interaction.user.mention,
             inline=False
         )
 
         embed.add_field(
-            name="🏆 تقييم المنتج",
-            value=f"{stars(product_score)}\n{product_score}/10",
+            name="📦 تقييم المنتج",
+            value=f"{product_score}/10\n{stars(product_score)}",
             inline=False
         )
 
         embed.add_field(
             name="💎 تقييم الخدمة",
-            value=f"{stars(service_score)}\n{service_score}/10",
+            value=f"{service_score}/10\n{stars(service_score)}",
             inline=False
         )
 
         embed.add_field(
-            name="📊 التقييم النهائي",
+            name="🎯 التقييم النهائي",
             value=f"{average}/10",
             inline=False
         )
@@ -131,18 +139,30 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
             url=interaction.user.display_avatar.url
         )
 
-        channel = bot.get_channel(REVIEW_CHANNEL)
+        embed.set_footer(
+            text="BLS Reviews System"
+        )
 
-        if channel:
-            await channel.send(
-                content=interaction.user.mention,
+        if review_channel:
+
+            await review_channel.send(
+                content=f"{interaction.user.mention}",
                 embed=embed
             )
 
-        role = interaction.guild.get_role(REVIEW_ROLE)
+        role = interaction.guild.get_role(
+            REVIEW_ROLE
+        )
 
         if role and role in interaction.user.roles:
-            await interaction.user.remove_roles(role)
+
+            try:
+                await interaction.user.remove_roles(
+                    role,
+                    reason="Used Review System"
+                )
+            except:
+                pass
 
         await interaction.response.send_message(
             "✅ تم إرسال تقييمك بنجاح",
@@ -150,7 +170,7 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
         )
 
 # ===============================
-# Review Button
+# Button
 # ===============================
 
 class ReviewView(View):
@@ -183,7 +203,7 @@ class ReviewView(View):
         )
 
 # ===============================
-# Command
+# Review Panel Command
 # ===============================
 
 @bot.command()
@@ -195,6 +215,11 @@ async def reviewpanel(ctx):
         description="اضغط الزر بالأسفل لتقييم المنتج والخدمة",
         color=0xFFD700
     )
+
+    if ctx.guild.icon:
+        embed.set_thumbnail(
+            url=ctx.guild.icon.url
+        )
 
     await ctx.send(
         embed=embed,
@@ -208,7 +233,7 @@ async def reviewpanel(ctx):
 @bot.event
 async def on_ready():
 
-    print(f"Logged in as {bot.user}")
+    print(f"✅ Logged in as {bot.user}")
 
     bot.add_view(
         ReviewView()
@@ -221,3 +246,4 @@ async def on_ready():
 keep_alive()
 
 bot.run(TOKEN)
+
