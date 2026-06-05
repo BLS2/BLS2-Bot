@@ -1,6 +1,8 @@
 import datetime
 import io
 import os
+import asyncio
+from collections import Counter
 from threading import Thread
 
 import discord
@@ -125,6 +127,48 @@ def build_discord_files(files_data: list[tuple[str, bytes]]) -> list[discord.Fil
         discord.File(io.BytesIO(file_bytes), filename=file_name)
         for file_name, file_bytes in files_data
     ]
+
+
+def split_message_content(content: str | None) -> list[str]:
+    if not content:
+        return []
+
+    max_length = 1900
+    return [
+        content[index:index + max_length]
+        for index in range(0, len(content), max_length)
+    ]
+
+
+def friendly_dm_error(error: discord.HTTPException) -> str:
+    if isinstance(error, discord.Forbidden):
+        return "الخاص مقفل أو العضو مانع رسائل البوت"
+
+    if isinstance(error, discord.NotFound):
+        return "العضو أو الخاص غير متاح"
+
+    if error.status == 400:
+        return "محتوى الرسالة أو المرفق غير مقبول من Discord"
+
+    if error.status == 413:
+        return "حجم المرفق كبير جدًا"
+
+    return f"خطأ Discord: {error.status}"
+
+
+async def send_private_broadcast(
+    member: discord.Member,
+    content_parts: list[str],
+    files_data: list[tuple[str, bytes]],
+) -> None:
+    dm_channel = await member.create_dm()
+
+    if content_parts:
+        for part in content_parts:
+            await dm_channel.send(part)
+
+    if files_data:
+        await dm_channel.send(files=build_discord_files(files_data))
 
 
 async def get_target_members(guild: discord.Guild) -> list[discord.Member]:
@@ -313,21 +357,50 @@ class BroadcastConfirmView(View):
 
         sent_count = 0
         failed_count = 0
-        content = self.source_message.content or None
+        failure_reasons: Counter[str] = Counter()
+        content_parts = split_message_content(self.source_message.content)
         members = await get_target_members(self.source_message.guild)
 
-        for member in members:
+        for index, member in enumerate(members, start=1):
             try:
-                await member.send(content=content, files=build_discord_files(self.files_data))
+                await send_private_broadcast(member, content_parts, self.files_data)
                 sent_count += 1
-            except discord.HTTPException:
+            except discord.HTTPException as error:
                 failed_count += 1
+                failure_reasons[friendly_dm_error(error)] += 1
+            except Exception as error:
+                failed_count += 1
+                failure_reasons[type(error).__name__] += 1
+
+            if index % 10 == 0:
+                await asyncio.sleep(2)
+
+            if index % 100 == 0:
+                try:
+                    await interaction.message.edit(
+                        content=(
+                            "⏳ جاري إرسال الرسالة في الخاص لكل أعضاء السيرفر...\n"
+                            f"تمت معالجة: **{index}/{len(members)}**\n"
+                            f"نجح: **{sent_count}** | فشل: **{failed_count}**"
+                        ),
+                        view=self,
+                    )
+                except discord.HTTPException:
+                    pass
+
+        reasons_text = "\n".join(
+            f"- {reason}: **{count}**"
+            for reason, count in failure_reasons.most_common(3)
+        )
+        if not reasons_text:
+            reasons_text = "- لا يوجد"
 
         await interaction.message.edit(
             content=(
                 "✅ انتهى إرسال الرسالة الخاصة.\n"
                 f"تم الإرسال بنجاح: **{sent_count}**\n"
-                f"تعذر الإرسال لهم: **{failed_count}**"
+                f"تعذر الإرسال لهم: **{failed_count}**\n\n"
+                f"أسباب الفشل:\n{reasons_text}"
             ),
             view=self,
         )
