@@ -50,6 +50,8 @@ REVIEW_PANEL_TITLE = "⭐ تقييم العملاء"
 REVIEW_PANEL_DESCRIPTION = "اضغط الزر لتقييم المنتج والخدمة"
 
 review_panel_message_id = None
+BROADCAST_DELAY_SECONDS = 2.5
+BROADCAST_PROGRESS_EVERY = 50
 
 
 # =====================================
@@ -142,7 +144,9 @@ def split_message_content(content: str | None) -> list[str]:
 
 def friendly_dm_error(error: discord.HTTPException) -> str:
     if isinstance(error, discord.Forbidden):
-        return "الخاص مقفل أو العضو مانع رسائل البوت"
+        if getattr(error, "code", None) == 50007:
+            return "الخاص مقفل أو العضو مانع رسائل البوت"
+        return f"Discord منع الإرسال: {getattr(error, 'code', 'بدون كود')}"
 
     if isinstance(error, discord.NotFound):
         return "العضو أو الخاص غير متاح"
@@ -154,6 +158,17 @@ def friendly_dm_error(error: discord.HTTPException) -> str:
         return "حجم المرفق كبير جدًا"
 
     return f"خطأ Discord: {error.status}"
+
+
+def format_error_for_log(member: discord.Member, error: Exception) -> str:
+    if isinstance(error, discord.HTTPException):
+        return (
+            f"DM failed | member={member} id={member.id} "
+            f"status={error.status} code={getattr(error, 'code', None)} "
+            f"text={getattr(error, 'text', '')}"
+        )
+
+    return f"DM failed | member={member} id={member.id} error={type(error).__name__}: {error}"
 
 
 async def send_private_broadcast(
@@ -169,6 +184,19 @@ async def send_private_broadcast(
 
     if files_data:
         await dm_channel.send(files=build_discord_files(files_data))
+
+
+async def send_broadcast_preview(
+    member: discord.Member,
+    content_parts: list[str],
+    files_data: list[tuple[str, bytes]],
+) -> None:
+    preview = "✅ اختبار الإرسال الخاص نجح. الآن سيبدأ البوت بإرسال رسالتك للأعضاء."
+    dm_channel = await member.create_dm()
+    await dm_channel.send(preview)
+
+    if content_parts or files_data:
+        await send_private_broadcast(member, content_parts, files_data)
 
 
 async def get_target_members(guild: discord.Guild) -> list[discord.Member]:
@@ -361,21 +389,50 @@ class BroadcastConfirmView(View):
         content_parts = split_message_content(self.source_message.content)
         members = await get_target_members(self.source_message.guild)
 
+        try:
+            await send_broadcast_preview(interaction.user, content_parts, self.files_data)
+        except discord.HTTPException as error:
+            reason = friendly_dm_error(error)
+            print(format_error_for_log(interaction.user, error))
+            return await interaction.message.edit(
+                content=(
+                    "❌ تم إيقاف الإرسال.\n"
+                    "البوت لم يستطع إرسال رسالة خاصة لك أنت أولًا، لذلك غالبًا لن يقدر يرسل للأعضاء.\n\n"
+                    f"السبب: **{reason}**\n"
+                    "افتح الخاص من إعدادات السيرفر ثم جرب مرة ثانية."
+                ),
+                view=self,
+            )
+        except Exception as error:
+            print(format_error_for_log(interaction.user, error))
+            return await interaction.message.edit(
+                content=(
+                    "❌ تم إيقاف الإرسال بسبب خطأ غير متوقع أثناء اختبار الخاص.\n"
+                    f"الخطأ: **{type(error).__name__}**"
+                ),
+                view=self,
+            )
+
         for index, member in enumerate(members, start=1):
+            if member.id == interaction.user.id:
+                sent_count += 1
+                continue
+
             try:
                 await send_private_broadcast(member, content_parts, self.files_data)
                 sent_count += 1
             except discord.HTTPException as error:
                 failed_count += 1
                 failure_reasons[friendly_dm_error(error)] += 1
+                print(format_error_for_log(member, error))
             except Exception as error:
                 failed_count += 1
                 failure_reasons[type(error).__name__] += 1
+                print(format_error_for_log(member, error))
 
-            if index % 10 == 0:
-                await asyncio.sleep(2)
+            await asyncio.sleep(BROADCAST_DELAY_SECONDS)
 
-            if index % 100 == 0:
+            if index % BROADCAST_PROGRESS_EVERY == 0:
                 try:
                     await interaction.message.edit(
                         content=(
