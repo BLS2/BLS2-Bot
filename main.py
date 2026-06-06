@@ -1,8 +1,5 @@
 import datetime
-import io
 import os
-import asyncio
-from collections import Counter
 from threading import Thread
 
 import discord
@@ -40,9 +37,6 @@ TOKEN = os.getenv("TOKEN")
 # روم التقييم فقط
 REVIEW_CHANNEL_ID = 1481443704383340585
 
-# روم إرسال الرسائل الخاصة لكل السيرفر فقط
-BROADCAST_CHANNEL_ID = 1507516304716992654
-
 # الرتبة المسموح لها بالتقييم
 REVIEW_ROLE_ID = 1507511064399577098
 
@@ -50,8 +44,6 @@ REVIEW_PANEL_TITLE = "⭐ تقييم العملاء"
 REVIEW_PANEL_DESCRIPTION = "اضغط الزر لتقييم المنتج والخدمة"
 
 review_panel_message_id = None
-BROADCAST_DELAY_SECONDS = 2.5
-BROADCAST_PROGRESS_EVERY = 50
 
 
 # =====================================
@@ -110,106 +102,6 @@ async def send_review_panel(channel: discord.TextChannel) -> discord.Message:
     )
     review_panel_message_id = message.id
     return message
-
-
-async def collect_attachment_bytes(message: discord.Message) -> list[tuple[str, bytes]]:
-    files_data = []
-
-    for attachment in message.attachments:
-        try:
-            files_data.append((attachment.filename, await attachment.read()))
-        except discord.HTTPException:
-            continue
-
-    return files_data
-
-
-def build_discord_files(files_data: list[tuple[str, bytes]]) -> list[discord.File]:
-    return [
-        discord.File(io.BytesIO(file_bytes), filename=file_name)
-        for file_name, file_bytes in files_data
-    ]
-
-
-def split_message_content(content: str | None) -> list[str]:
-    if not content:
-        return []
-
-    max_length = 1900
-    return [
-        content[index:index + max_length]
-        for index in range(0, len(content), max_length)
-    ]
-
-
-def friendly_dm_error(error: discord.HTTPException) -> str:
-    if isinstance(error, discord.Forbidden):
-        if getattr(error, "code", None) == 50007:
-            return "الخاص مقفل أو العضو مانع رسائل البوت"
-        return f"Discord منع الإرسال: {getattr(error, 'code', 'بدون كود')}"
-
-    if isinstance(error, discord.NotFound):
-        return "العضو أو الخاص غير متاح"
-
-    if error.status == 400:
-        return "محتوى الرسالة أو المرفق غير مقبول من Discord"
-
-    if error.status == 413:
-        return "حجم المرفق كبير جدًا"
-
-    return f"خطأ Discord: {error.status}"
-
-
-def format_error_for_log(member: discord.Member, error: Exception) -> str:
-    if isinstance(error, discord.HTTPException):
-        return (
-            f"DM failed | member={member} id={member.id} "
-            f"status={error.status} code={getattr(error, 'code', None)} "
-            f"text={getattr(error, 'text', '')}"
-        )
-
-    return f"DM failed | member={member} id={member.id} error={type(error).__name__}: {error}"
-
-
-async def send_private_broadcast(
-    member: discord.Member,
-    content_parts: list[str],
-    files_data: list[tuple[str, bytes]],
-) -> None:
-    dm_channel = await member.create_dm()
-
-    if content_parts:
-        for part in content_parts:
-            await dm_channel.send(part)
-
-    if files_data:
-        await dm_channel.send(files=build_discord_files(files_data))
-
-
-async def send_broadcast_preview(
-    member: discord.Member,
-    content_parts: list[str],
-    files_data: list[tuple[str, bytes]],
-) -> None:
-    preview = "✅ اختبار الإرسال الخاص نجح. الآن سيبدأ البوت بإرسال رسالتك للأعضاء."
-    dm_channel = await member.create_dm()
-    await dm_channel.send(preview)
-
-    if content_parts or files_data:
-        await send_private_broadcast(member, content_parts, files_data)
-
-
-async def get_target_members(guild: discord.Guild) -> list[discord.Member]:
-    members: list[discord.Member] = []
-
-    try:
-        async for member in guild.fetch_members(limit=None):
-            if not member.bot:
-                members.append(member)
-    except discord.HTTPException:
-        members = [member for member in guild.members if not member.bot]
-
-    return members
 
 
 # =====================================
@@ -348,156 +240,6 @@ async def review_panel_error(ctx: commands.Context, error: commands.CommandError
 
 
 # =====================================
-# Broadcast system
-# =====================================
-
-class BroadcastConfirmView(View):
-    def __init__(self, source_message: discord.Message, files_data: list[tuple[str, bytes]]):
-        super().__init__(timeout=120)
-        self.source_message = source_message
-        self.files_data = files_data
-        self.finished = False
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.source_message.author.id:
-            await interaction.response.send_message(
-                "❌ هذا التأكيد خاص بصاحب الرسالة فقط.",
-                ephemeral=True,
-            )
-            return False
-        return True
-
-    @discord.ui.button(label="نعم، أرسل", emoji="✅", style=discord.ButtonStyle.success)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.finished:
-            return await interaction.response.send_message(
-                "تم التعامل مع هذه العملية مسبقًا.",
-                ephemeral=True,
-            )
-
-        self.finished = True
-        disable_view_items(self)
-
-        await interaction.response.edit_message(
-            content="⏳ جاري إرسال الرسالة في الخاص لكل أعضاء السيرفر...",
-            view=self,
-        )
-
-        sent_count = 0
-        failed_count = 0
-        failure_reasons: Counter[str] = Counter()
-        content_parts = split_message_content(self.source_message.content)
-        members = await get_target_members(self.source_message.guild)
-
-        try:
-            await send_broadcast_preview(interaction.user, content_parts, self.files_data)
-        except discord.HTTPException as error:
-            reason = friendly_dm_error(error)
-            print(format_error_for_log(interaction.user, error))
-            return await interaction.message.edit(
-                content=(
-                    "❌ تم إيقاف الإرسال.\n"
-                    "البوت لم يستطع إرسال رسالة خاصة لك أنت أولًا، لذلك غالبًا لن يقدر يرسل للأعضاء.\n\n"
-                    f"السبب: **{reason}**\n"
-                    "افتح الخاص من إعدادات السيرفر ثم جرب مرة ثانية."
-                ),
-                view=self,
-            )
-        except Exception as error:
-            print(format_error_for_log(interaction.user, error))
-            return await interaction.message.edit(
-                content=(
-                    "❌ تم إيقاف الإرسال بسبب خطأ غير متوقع أثناء اختبار الخاص.\n"
-                    f"الخطأ: **{type(error).__name__}**"
-                ),
-                view=self,
-            )
-
-        for index, member in enumerate(members, start=1):
-            if member.id == interaction.user.id:
-                sent_count += 1
-                continue
-
-            try:
-                await send_private_broadcast(member, content_parts, self.files_data)
-                sent_count += 1
-            except discord.HTTPException as error:
-                failed_count += 1
-                failure_reasons[friendly_dm_error(error)] += 1
-                print(format_error_for_log(member, error))
-            except Exception as error:
-                failed_count += 1
-                failure_reasons[type(error).__name__] += 1
-                print(format_error_for_log(member, error))
-
-            await asyncio.sleep(BROADCAST_DELAY_SECONDS)
-
-            if index % BROADCAST_PROGRESS_EVERY == 0:
-                try:
-                    await interaction.message.edit(
-                        content=(
-                            "⏳ جاري إرسال الرسالة في الخاص لكل أعضاء السيرفر...\n"
-                            f"تمت معالجة: **{index}/{len(members)}**\n"
-                            f"نجح: **{sent_count}** | فشل: **{failed_count}**"
-                        ),
-                        view=self,
-                    )
-                except discord.HTTPException:
-                    pass
-
-        reasons_text = "\n".join(
-            f"- {reason}: **{count}**"
-            for reason, count in failure_reasons.most_common(3)
-        )
-        if not reasons_text:
-            reasons_text = "- لا يوجد"
-
-        await interaction.message.edit(
-            content=(
-                "✅ انتهى إرسال الرسالة الخاصة.\n"
-                f"تم الإرسال بنجاح: **{sent_count}**\n"
-                f"تعذر الإرسال لهم: **{failed_count}**\n\n"
-                f"أسباب الفشل:\n{reasons_text}"
-            ),
-            view=self,
-        )
-
-    @discord.ui.button(label="لا، إلغاء", emoji="❌", style=discord.ButtonStyle.danger)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.finished:
-            return await interaction.response.send_message(
-                "تم التعامل مع هذه العملية مسبقًا.",
-                ephemeral=True,
-            )
-
-        self.finished = True
-        disable_view_items(self)
-
-        await interaction.response.edit_message(
-            content="تم إلغاء الإرسال الخاص.",
-            view=self,
-        )
-
-    async def on_timeout(self):
-        if self.finished:
-            return
-
-        self.finished = True
-        disable_view_items(self)
-
-
-async def ask_for_broadcast_confirmation(message: discord.Message):
-    files_data = await collect_attachment_bytes(message)
-    view = BroadcastConfirmView(message, files_data)
-
-    await message.reply(
-        "هل تريد إرسال هذه الرسالة في الخاص لكل أعضاء السيرفر؟",
-        mention_author=False,
-        view=view,
-    )
-
-
-# =====================================
 # Events
 # =====================================
 
@@ -506,7 +248,6 @@ async def on_ready():
     bot.add_view(ReviewView())
     print(f"✅ Logged in as {bot.user}")
     print(f"✅ Review channel: {REVIEW_CHANNEL_ID}")
-    print(f"✅ Broadcast channel: {BROADCAST_CHANNEL_ID}")
 
 
 @bot.event
@@ -516,18 +257,6 @@ async def on_message(message: discord.Message):
 
     if message.content.startswith(bot.command_prefix):
         await bot.process_commands(message)
-        return
-
-    if message.channel.id != BROADCAST_CHANNEL_ID:
-        return
-
-    if not message.author.guild_permissions.administrator:
-        return
-
-    if not message.content and not message.attachments:
-        return
-
-    await ask_for_broadcast_confirmation(message)
 
 
 # =====================================
