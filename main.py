@@ -109,6 +109,14 @@ async def send_review_panel(channel: discord.TextChannel) -> discord.Message:
 # =====================================
 
 class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
+    # الخانة الجديدة لاسم المنتج المشترى
+    product_name = TextInput(
+        label="المنتج الذي اشتريته",
+        placeholder="مثال: بوت حماية، سيرفر كامل، رتبة..",
+        required=True,
+        max_length=50,
+    )
+
     product = TextInput(
         label="تقييم المنتج من 1 إلى 10",
         placeholder="مثال: 10",
@@ -129,7 +137,7 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
             service_score = int(self.service.value)
         except ValueError:
             return await interaction.response.send_message(
-                "❌ يجب إدخال أرقام فقط.",
+                "❌ يجب إدخال أرقام فقط في خانات التقييم.",
                 ephemeral=True,
             )
 
@@ -163,6 +171,8 @@ class ReviewModal(Modal, title="تقييم المنتج والخدمة"):
         )
         embed.add_field(name="👤 العميل", value=interaction.user.mention, inline=False)
         embed.add_field(name="🏷️ رتبة العميل", value=role_text, inline=False)
+        # إظهار اسم المنتج داخل الـ Embed
+        embed.add_field(name="🛒 المنتج المشترى", value=f"**{self.product_name.value}**", inline=False)
         embed.add_field(
             name="📦 تقييم المنتج",
             value=f"{stars(product_score)}\n**{product_score}/10**",
