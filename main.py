@@ -46,9 +46,7 @@ REVIEW_PANEL_TITLE = "⭐ تقييم العملاء"
 REVIEW_PANEL_DESCRIPTION = "اضغط الزر لتقييم المنتج والخدمة"
 
 # نظام الإجازات
-# مهم: غير هذا ID لروم لوحة الإجازات الصحيح.
-# ما وصلني ID روم لوحة الإجازات، فحطيته مؤقتا نفس روم لوقات الإجازات.
-LEAVE_PANEL_CHANNEL_ID = 1490820000477610036
+LEAVE_PANEL_CHANNEL_ID = 1490070238270718013
 LEAVE_LOG_CHANNEL_ID = 1490820000477610036
 LEAVE_ROLE_ID = 1492607429249339502
 MIN_LEAVE_DAYS = 3
@@ -92,6 +90,7 @@ default_data = {
     "leave_panel_message_id": None,
     "warning_panel_message_id": None,
     "active_leaves": {},
+    "active_warnings": {},
 }
 
 data = default_data.copy()
@@ -114,6 +113,7 @@ def load_data() -> None:
     data = default_data.copy()
     data.update(loaded)
     data.setdefault("active_leaves", {})
+    data.setdefault("active_warnings", {})
 
 
 def save_data() -> None:
@@ -685,6 +685,16 @@ class WarningIssueModal(Modal, title="تنزيل إنذار"):
                 ephemeral=True,
             )
 
+        data["active_warnings"][str(member.id)] = {
+            "guild_id": interaction.guild.id,
+            "user_id": member.id,
+            "moderator_id": interaction.user.id,
+            "reason": self.reason.value,
+            "duration": self.duration.value,
+            "ends_at": until.isoformat(),
+        }
+        save_data()
+
         log_channel = await get_text_channel(interaction.guild, WARNING_LOG_CHANNEL_ID)
         if log_channel:
             embed = discord.Embed(
@@ -748,6 +758,9 @@ class WarningRemoveModal(Modal, title="سحب إنذار"):
                 ephemeral=True,
             )
 
+        data["active_warnings"].pop(str(member.id), None)
+        save_data()
+
         log_channel = await get_text_channel(interaction.guild, WARNING_LOG_CHANNEL_ID)
         if log_channel:
             embed = discord.Embed(
@@ -765,6 +778,43 @@ class WarningRemoveModal(Modal, title="سحب إنذار"):
             f"✅ تم سحب الإنذار من {member.mention}.",
             ephemeral=True,
         )
+
+
+@tasks.loop(minutes=5)
+async def check_expired_warnings():
+    now = utc_now()
+    changed = False
+
+    for user_key, warning in list(data["active_warnings"].items()):
+        ends_at = parse_datetime(warning["ends_at"])
+        if now < ends_at:
+            continue
+
+        guild = bot.get_guild(int(warning["guild_id"]))
+        if guild is None:
+            continue
+
+        data["active_warnings"].pop(user_key, None)
+        changed = True
+
+        log_channel = await get_text_channel(guild, WARNING_LOG_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(
+                title="انتهت مدة الإنذار",
+                color=0x5865F2,
+                timestamp=now,
+            )
+            embed.add_field(name="الشخص", value=f"<@{warning['user_id']}>", inline=False)
+            embed.add_field(name="المدة", value=warning["duration"], inline=True)
+            embed.add_field(name="السبب", value=warning["reason"], inline=False)
+            embed.set_footer(text=f"{guild.name} • Warning System")
+            await log_channel.send(
+                content=f"✅ انتهت مدة إنذار <@{warning['user_id']}>",
+                embed=embed,
+            )
+
+    if changed:
+        save_data()
 
 
 class WarningView(View):
@@ -817,6 +867,9 @@ async def on_ready():
 
     if not check_expired_leaves.is_running():
         check_expired_leaves.start()
+
+    if not check_expired_warnings.is_running():
+        check_expired_warnings.start()
 
     print(f"✅ Logged in as {bot.user}")
     print(f"✅ Review channel: {REVIEW_CHANNEL_ID}")
